@@ -3,8 +3,12 @@
 	"displayName": "B站悬停刷视频",
 	"description": "侧边栏浏览B站推荐视频（支持 Cookie 个性化与搜索）。不伪装模式：侧边栏视频流卡片列表，点击后视频在卡片位置原位播放；伪装模式：点击视频在编辑区打开播放面板，面板伪装为本地代码文件，画面被遮罩、聚焦显示/失焦隐藏。",
 	"version": "0.2.1",
-	"publisher": "localdev",
+	"publisher": "moyu-yao",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/yq04011024/fish-hover"
+	},
 	"engines": {
 		"vscode": "^1.80.0"
 	},
@@ -201,5 +205,11 @@
 				}
 			]
 		}
+	},
+	"devDependencies": {
+		"@vscode/vsce": "^2.22.0"
+	},
+	"overrides": {
+		"cheerio": "1.0.0"
 	}
 }
