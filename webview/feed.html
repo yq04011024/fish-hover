@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<meta name="referrer" content="no-referrer">
+<title>视频流</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--vscode-sideBar-background, #1e1e1e);
+    color: var(--vscode-sideBar-foreground, #d4d4d4);
+    overflow: auto;
+  }
+  /* ---- 列表视图 ---- */
+  .cardlist { padding: 8px; display: flex; flex-direction: column; gap: 12px; }
+  .card { cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(128, 128, 128, 0.08); }
+  .card:hover { outline: 1px solid var(--vscode-focusBorder, #0e639c); }
+  .card.playing { outline: 1px solid var(--vscode-focusBorder, #0e639c); }
+  .cover { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+  .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cover .dur {
+    position: absolute; right: 6px; bottom: 6px; background: rgba(0, 0, 0, 0.7);
+    color: #fff; font-size: 11px; padding: 1px 5px; border-radius: 3px;
+  }
+  .card .info { padding: 8px 10px 10px; }
+  .card .t {
+    font-size: 13px; line-height: 1.4; margin-bottom: 4px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card .sub { font-size: 11px; color: var(--vscode-descriptionForeground, #9aa0a6); display: flex; gap: 10px; flex-wrap: wrap; }
+  .empty { padding: 30px 12px; text-align: center; color: var(--vscode-descriptionForeground, #9aa0a6); font-size: 12px; }
+  .pagebar {
+    display: none; align-items: center; justify-content: center; gap: 12px;
+    padding: 8px 0 14px; font-size: 12px; color: var(--vscode-descriptionForeground, #9aa0a6);
+  }
+  .pagebar button {
+    background: var(--vscode-button-secondaryBackground, #3c3c3c);
+    color: var(--vscode-button-secondaryForeground, #d4d4d4);
+    border: none; border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+  .pagebar button:disabled { opacity: 0.4; cursor: default; }
+  /* ---- 卡片内原位播放器：覆盖在封面位置，右上角关闭按钮 ---- */
+  .inline-player { position: absolute; inset: 0; z-index: 2; background: #000; }
+  .inline-player video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  .inline-player .close-btn {
+    position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; z-index: 3;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.7); border: none; border-radius: 50%;
+    color: #fff; font-size: 15px; cursor: pointer; transition: all 0.2s ease;
+  }
+  .inline-player .close-btn:hover { background: #fb7299; transform: scale(1.1); }
+  /* 状态条（加载中/错误），叠加在播放画面底部 */
+  .player-status {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    padding: 4px 10px; font-size: 11px; display: none;
+    background: rgba(20, 20, 20, 0.82); color: #bbbbbb;
+  }
+  .player-status.err { background: rgba(120, 30, 30, 0.85); color: #ffd7d7; }
+</style>
+</head>
+<body>
+<div id="listView">
+  <div class="cardlist" id="cardList"><div class="empty">正在加载推荐视频…</div></div>
+  <div class="pagebar" id="pageBar">
+    <button id="prevPage">上一页</button>
+    <span id="pageInfo"></span>
+    <button id="nextPage">下一页</button>
+  </div>
+</div>
+<!-- 原位播放器：点击卡片时由脚本移入该卡片的封面区域 -->
+<div class="inline-player" id="inlinePlayer" style="display:none">
+  <video id="player" preload="auto" __AUTO_START__></video>
+  <button class="close-btn" id="closeBtn" title="关闭播放">✕</button>
+  <div class="player-status" id="playerStatus"></div>
+</div>
+<script>
+  const vscode = acquireVsCodeApi();
+  const player = document.getElementById('player');
+  const inlinePlayer = document.getElementById('inlinePlayer');
+  const playerStatus = document.getElementById('playerStatus');
+  let currentBvid = '';
+  let pendingBvid = '';
+  let playingCard = null;
+  let pendingPlayBvid = '';
+
+  function showStatus(text, isError) {
+    playerStatus.textContent = text;
+    playerStatus.classList.toggle('err', Boolean(isError));
+    playerStatus.style.display = 'block';
+  }
+  function hideStatus() {
+    playerStatus.style.display = 'none';
+  }
+  function esc(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function renderEntries(entries, meta) {
+    const list = document.getElementById('cardList');
+    if (!entries.length) {
+      list.innerHTML = '<div class="empty">暂无视频，点击上方「刷新视频」加载</div>';
+    } else {
+      list.innerHTML = entries.map((v) => (
+        '<div class="card" data-bvid="' + esc(v.bvid) + '">' +
+          '<div class="cover">' +
+            (v.cover ? '<img src="' + esc(v.cover) + '" referrerpolicy="no-referrer" loading="lazy" alt="">' : '') +
+            (v.durationText ? '<span class="dur">' + esc(v.durationText) + '</span>' : '') +
+          '</div>' +
+          '<div class="info">' +
+            '<div class="t">' + esc(v.title) + '</div>' +
+            '<div class="sub">' +
+              '<span>@' + esc(v.uploader) + '</span>' +
+              '<span>播放 ' + esc(v.playCountText) + '</span>' +
+              '<span>弹幕 ' + esc(v.danmakuCountText) + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      )).join('');
+    }
+    const pageBar = document.getElementById('pageBar');
+    if (meta && meta.searchMode && meta.totalPages > 1) {
+      pageBar.style.display = 'flex';
+      document.getElementById('pageInfo').textContent = '第 ' + meta.page + ' / ' + meta.totalPages + ' 页';
+      document.getElementById('prevPage').disabled = !meta.canPrev;
+      document.getElementById('nextPage').disabled = !meta.canNext;
+    } else {
+      pageBar.style.display = 'none';
+    }
+    if (pendingPlayBvid) {
+      const bvid = pendingPlayBvid;
+      pendingPlayBvid = '';
+      playByBvid(bvid); // 外部指定的视频可能早于列表渲染到达，此处补播
+    }
+  }
+
+  /* 停止播放：释放视频流，封面恢复显示 */
+  function stopPlayback() {
+    pendingBvid = '';
+    currentBvid = '';
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+    inlinePlayer.style.display = 'none';
+    hideStatus();
+    if (playingCard) {
+      playingCard.classList.remove('playing');
+      playingCard = null;
+    }
+  }
+
+  /* 在指定卡片内原位播放 */
+  function playCard(card) {
+    if (playingCard === card) return; // 该卡片正在播放
+    stopPlayback();
+    playingCard = card;
+    card.classList.add('playing');
+    const cover = card.querySelector('.cover');
+    cover.insertBefore(inlinePlayer, cover.firstChild);
+    inlinePlayer.style.display = 'block';
+    showStatus('正在获取视频流…', false);
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    pendingBvid = card.dataset.bvid;
+    vscode.postMessage({ command: 'feed:play', bvid: pendingBvid });
+  }
+  function playByBvid(bvid) {
+    if (!bvid) return;
+    const card = document.querySelector('.card[data-bvid="' + bvid + '"]');
+    if (card) {
+      playCard(card);
+    } else {
+      pendingPlayBvid = bvid; // 列表尚未渲染，待条目到达后补播
+    }
+  }
+
+  document.getElementById('cardList').addEventListener('click', (event) => {
+    const card = event.target.closest('.card');
+    if (!card || !card.dataset.bvid) return;
+    playCard(card);
+  });
+  document.getElementById('closeBtn').addEventListener('click', (event) => {
+    event.stopPropagation();
+    stopPlayback();
+  });
+  document.getElementById('prevPage').addEventListener('click', () => {
+    vscode.postMessage({ command: 'feed:prevPage' });
+  });
+  document.getElementById('nextPage').addEventListener('click', () => {
+    vscode.postMessage({ command: 'feed:nextPage' });
+  });
+
+  player.volume = __VOLUME__;
+  player.controls = true;
+  player.addEventListener('playing', hideStatus);
+  player.addEventListener('error', () => {
+    showStatus('视频流加载出错（链接可能已失效），可点击标题栏搜索换一个视频', true);
+  });
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (!msg || typeof msg.command !== 'string') { return; }
+    if (msg.command === 'feed:entries') {
+      renderEntries(msg.entries || [], msg.meta || {});
+    } else if (msg.command === 'feed:playRequest') {
+      playByBvid(msg.bvid); // 外部命令（如随机播放）指定的视频
+    } else if (msg.command === 'feed:playerData') {
+      const entry = msg.entry || {};
+      if (!pendingBvid || entry.bvid !== pendingBvid) { return; } // 已停止/切换视频，丢弃过期响应
+      currentBvid = entry.bvid;
+      const url = msg.streamUrls && msg.streamUrls[0];
+      if (url) {
+        player.src = url;
+        player.play().catch(() => {});
+      }
+    } else if (msg.command === 'feed:playerError') {
+      showStatus(msg.cookieExpired
+        ? 'Cookie 失效或未配置，请点击标题栏齿轮设置。'
+        : ('播放失败：' + (msg.message || '未知错误')), true);
+    }
+  });
+
+  vscode.postMessage({ command: 'feed:requestEntries' });
+</script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<meta name="referrer" content="no-referrer">
+<title>B站视频</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #000; color: #fff; padding: 16px; overflow: auto;
+  }
+  .pane {
+    width: __PANE_WIDTH__px; max-width: 100%; margin: 0 auto;
+    background: #16181d; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    resize: horizontal; min-width: 200px;
+  }
+  /* 视频画面区：默认被遮罩盖住，聚焦/悬停时淡出显示画面、失焦恢复伪装 */
+  .screen { position: relative; width: 100%; height: 560px; background: #000; }
+  .screen video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .veil {
+    position: absolute; inset: 0; background: #000; overflow: hidden;
+    user-select: none; transition: opacity 0.3s ease; z-index: 2;
+  }
+  .screen:hover .veil { opacity: 0; pointer-events: none; }
+  /* 伪装代码内容（编辑器风格） */
+  .disguise {
+    font-family: Consolas, 'Courier New', monospace;
+    font-size: 12px; line-height: 1.55; color: #d4d4d4;
+    background: #1e1e1e; padding: 10px 0; height: 100%; overflow: hidden;
+  }
+  .disguise .cl { display: flex; white-space: pre; }
+  .disguise .ln {
+    width: 44px; min-width: 44px; text-align: right; padding-right: 12px;
+    color: #6e7681; background: #1e1e1e;
+  }
+  .disguise .ct { flex: 1; padding-right: 10px; }
+  /* 状态条（加载中/错误），叠加在画面底部 */
+  .load-status {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 5px 12px; background: rgba(20, 20, 20, 0.82);
+    color: #9aa0a6; font-size: 12px; display: none; z-index: 3;
+  }
+  .stream-error {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 5px 12px; background: rgba(120, 30, 30, 0.85);
+    color: #ffd7d7; font-size: 12px; display: none; z-index: 3;
+  }
+  /* 视频信息区 */
+  .meta { padding: 14px 16px 16px; }
+  .meta h2 { font-size: 16px; font-weight: 600; line-height: 1.45; margin-bottom: 8px; }
+  .meta .byline { color: #9aa0a6; font-size: 13px; margin-bottom: 8px; }
+  .meta .stats { display: flex; gap: 16px; color: #8a9096; font-size: 12px; margin-bottom: 10px; }
+  .meta .summary { color: #8a9096; font-size: 13px; line-height: 1.55; max-height: 84px; overflow: auto; }
+  .actions { padding: 0 16px 16px; }
+  .actions button {
+    background: #fb7299; color: #fff; border: none; border-radius: 16px;
+    padding: 8px 18px; font-size: 13px; cursor: pointer;
+  }
+  .actions button:hover { background: #e05e86; }
+</style>
+</head>
+<body>
+<div class="pane" id="pane">
+  <div class="screen" id="screen">
+    <video id="player" preload="auto" __AUTO_START__></video>
+    <div class="veil" id="veil">__DISGUISE_HTML__</div>
+    <div class="load-status" id="loadStatus"></div>
+    <div class="stream-error" id="streamError"></div>
+  </div>
+  <div class="meta">
+    <h2 id="videoTitle"></h2>
+    <div class="byline" id="videoByline"></div>
+    <div class="stats">
+      <span id="videoPlay"></span>
+      <span id="videoDanmaku"></span>
+      <span id="videoDuration"></span>
+    </div>
+    <div class="summary" id="videoSummary"></div>
+  </div>
+  <div class="actions">
+    <button id="openOnSite">去B站观看</button>
+  </div>
+</div>
+<script>
+  const vscode = acquireVsCodeApi();
+  const entry = __ENTRY__;
+  const player = document.getElementById('player');
+  const streamError = document.getElementById('streamError');
+
+  document.getElementById('videoTitle').textContent = entry.title;
+  document.getElementById('videoByline').textContent = '@' + entry.uploader;
+  document.getElementById('videoPlay').textContent = '播放 ' + entry.playCountText;
+  document.getElementById('videoDanmaku').textContent = '弹幕 ' + entry.danmakuCountText;
+  document.getElementById('videoDuration').textContent = '时长 ' + entry.durationText;
+  document.getElementById('videoSummary').textContent = entry.summary || '（暂无简介）';
+
+  player.volume = __VOLUME__;
+  player.controls = true;
+
+  document.getElementById('openOnSite').addEventListener('click', () => {
+    vscode.postMessage({ command: 'pane:openOnSite' });
+  });
+
+  // 面板宽度拖拽记忆（防抖后上报）
+  const pane = document.getElementById('pane');
+  if (window.ResizeObserver) {
+    let widthReportTimer = null;
+    new ResizeObserver((entries) => {
+      const width = Math.round(entries[0].contentRect.width);
+      clearTimeout(widthReportTimer);
+      widthReportTimer = setTimeout(() => {
+        vscode.postMessage({ command: 'pane:persistWidth', width });
+      }, 500);
+    }).observe(pane);
+  }
+
+  // 拉取播放流（状态提示显示在底部小条，不破坏遮罩上的伪装内容）
+  const loadStatus = document.getElementById('loadStatus');
+  function showLoading(text) {
+    streamError.style.display = 'none';
+    loadStatus.textContent = text;
+    loadStatus.style.display = 'block';
+  }
+  function hideStatus() {
+    loadStatus.style.display = 'none';
+    streamError.style.display = 'none';
+  }
+  function requestStream() {
+    showLoading('正在获取视频流…');
+    vscode.postMessage({ command: 'pane:requestStream', videoBvid: entry.bvid });
+  }
+
+  // 视频元素自身加载失败（如 CDN 403）时也给出提示
+  player.addEventListener('error', () => {
+    loadStatus.style.display = 'none';
+    streamError.textContent = '视频流加载出错（链接可能已失效），可点击「去B站观看」';
+    streamError.style.display = 'block';
+  });
+
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (!msg || typeof msg.command !== 'string') { return; }
+    if (msg.command === 'pane:streamReady') {
+      const url = msg.streamUrls && msg.streamUrls[0];
+      if (url) {
+        hideStatus();
+        player.src = url;
+        player.play().catch(() => {});
+      }
+    } else if (msg.command === 'pane:streamError') {
+      loadStatus.style.display = 'none';
+      streamError.textContent = msg.cookieExpired
+        ? 'Cookie 失效或未配置，请点击侧边栏标题栏的设置按钮。'
+        : ('播放失败：' + (msg.message || '未知错误'));
+      streamError.style.display = 'block';
+    }
+  });
+
+  requestStream();
+</script>
+</body>
+</html>

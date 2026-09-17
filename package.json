@@ -1,0 +1,205 @@
+{
+	"name": "fish-hover",
+	"displayName": "B站悬停刷视频",
+	"description": "侧边栏浏览B站推荐视频（支持 Cookie 个性化与搜索）。不伪装模式：侧边栏视频流卡片列表，点击后视频在卡片位置原位播放；伪装模式：点击视频在编辑区打开播放面板，面板伪装为本地代码文件，画面被遮罩、聚焦显示/失焦隐藏。",
+	"version": "0.2.1",
+	"publisher": "localdev",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.80.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [],
+	"main": "./extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "biliHover.refreshVideoList",
+				"title": "刷新视频",
+				"icon": "$(refresh)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.searchVideos",
+				"title": "搜索视频",
+				"icon": "$(search)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.configureCookie",
+				"title": "设置B站Cookie",
+				"icon": "$(gear)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.customizeSidebarTitle",
+				"title": "自定义侧边栏标题",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.searchPrevPage",
+				"title": "搜索结果：上一页",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.searchNextPage",
+				"title": "搜索结果：下一页",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.playRandomVideo",
+				"title": "随机播放",
+				"icon": "$(play-circle)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.toggleDisguise",
+				"title": "切换是否伪装",
+				"icon": "$(eye-closed)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.playSelectedVideo",
+				"title": "播放该视频",
+				"category": "聚焦视界"
+			}
+		],
+		"configuration": {
+			"title": "聚焦视界",
+			"properties": {
+				"biliHover.userCookie": {
+					"type": "string",
+					"default": "",
+					"markdownDescription": "B站账号 Cookie（从浏览器开发者工具复制完整 Cookie 值）。配置后推荐列表将按账号个性化加载；留空则使用随机推荐。",
+					"order": 1
+				},
+				"biliHover.autoStartPlayback": {
+					"type": "boolean",
+					"default": true,
+					"description": "打开播放面板时自动开始播放",
+					"order": 2
+				},
+				"biliHover.initialVolume": {
+					"type": "number",
+					"default": 0.5,
+					"minimum": 0,
+					"maximum": 1,
+					"description": "播放器初始音量（0-1）",
+					"order": 3
+				},
+				"biliHover.playerPaneWidth": {
+					"type": "number",
+					"default": 400,
+					"minimum": 200,
+					"maximum": 1200,
+					"description": "播放面板宽度（像素），可在面板内拖拽调整并自动记忆",
+					"order": 4
+				},
+				"biliHover.playerPaneTitle": {
+					"type": "string",
+					"default": "jsProject00111.js",
+					"description": "伪装模式下播放面板的标题文字（让面板看起来像一个本地代码文件）",
+					"order": 5
+				},
+				"biliHover.disguiseFilePath": {
+					"type": "string",
+					"default": "",
+					"markdownDescription": "伪装模式下播放面板遮罩显示的本地文件**绝对路径**（支持 java/vue/js/html/xml/txt 等文本文件），遮罩将展示该文件内容（带行号、编辑器风格），聚焦/悬停时淡出显示视频；留空则遮罩为纯黑。",
+					"order": 6
+				},
+				"biliHover.disguiseEnabled": {
+					"type": "boolean",
+					"default": false,
+					"markdownDescription": "是否伪装。**关闭**：侧边栏为视频流卡片列表，点击后视频在该卡片位置原位播放；**开启**：侧边栏为视频列表，点击后在编辑区打开播放面板——面板伪装为本地代码文件，画面被遮罩、聚焦显示/失焦隐藏",
+					"order": 7
+				},
+				"biliHover.sidebarViewTitle": {
+					"type": "string",
+					"default": "聚焦视界",
+					"description": "侧边栏视图标题（修改后需重启编辑器生效）",
+					"order": 8
+				}
+			}
+		},
+		"menus": {
+			"view/title": [
+				{
+					"command": "biliHover.searchVideos",
+					"when": "view == biliHoverVideoList",
+					"group": "navigation@0"
+				},
+				{
+					"command": "biliHover.searchVideos",
+					"when": "view == biliHoverFeedView",
+					"group": "navigation@0"
+				},
+				{
+					"command": "biliHover.playRandomVideo",
+					"when": "view == biliHoverVideoList",
+					"group": "navigation@1"
+				},
+				{
+					"command": "biliHover.playRandomVideo",
+					"when": "view == biliHoverFeedView",
+					"group": "navigation@1"
+				},
+				{
+					"command": "biliHover.toggleDisguise",
+					"when": "view == biliHoverVideoList",
+					"group": "navigation@2"
+				},
+				{
+					"command": "biliHover.toggleDisguise",
+					"when": "view == biliHoverFeedView",
+					"group": "navigation@2"
+				},
+				{
+					"command": "biliHover.configureCookie",
+					"when": "view == biliHoverVideoList",
+					"group": "navigation@3"
+				},
+				{
+					"command": "biliHover.configureCookie",
+					"when": "view == biliHoverFeedView",
+					"group": "navigation@3"
+				},
+				{
+					"command": "biliHover.refreshVideoList",
+					"when": "view == biliHoverVideoList",
+					"group": "navigation@4"
+				},
+				{
+					"command": "biliHover.refreshVideoList",
+					"when": "view == biliHoverFeedView",
+					"group": "navigation@4"
+				}
+			]
+		},
+		"views": {
+			"biliHoverView": [
+				{
+					"id": "biliHoverVideoList",
+					"name": "聚焦视界",
+					"when": "config.biliHover.disguiseEnabled"
+				},
+				{
+					"id": "biliHoverFeedView",
+					"name": "聚焦视界",
+					"type": "webview",
+					"when": "!config.biliHover.disguiseEnabled"
+				}
+			]
+		},
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "biliHoverView",
+					"title": "聚焦视界",
+					"icon": "resources/viewer-icon.svg"
+				}
+			]
+		}
+	}
+}

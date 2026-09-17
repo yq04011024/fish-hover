@@ -1,0 +1,12 @@
+# 依赖与构建产物
+node_modules/
+*.vsix
+
+# 测试环境
+.vscode-test/
+.vscode/.test-cov/
+
+# 系统与编辑器杂项
+.DS_Store
+Thumbs.db
+*.log

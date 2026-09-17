@@ -1,0 +1,6 @@
+# 不参与 VSIX 打包的文件
+.vscode/**
+node_modules/**
+.git/**
+**/*.map
+**/.DS_Store
