@@ -5,225 +5,901 @@
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; img-src https: data:; media-src https:; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <meta name="referrer" content="no-referrer">
-<title>视频流</title>
+<title>B站视频流</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--vscode-sideBar-background, #1e1e1e);
-    color: var(--vscode-sideBar-foreground, #d4d4d4);
-    overflow: auto;
+  :root { --app-font-size: 14px; --bili-blue: #00a1d6; --bili-pink: #fb7299; --border: var(--vscode-chat-requestBorder); }
+  * { font-family: "Microsoft YaHei", var(--vscode-font-family); box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background-color: var(--vscode-editor-background); height: 100vh; overflow: hidden; scrollbar-color: var(--vscode-scrollbarSlider-background) transparent; scrollbar-width: thin; }
+  *:focus { outline: none; }
+
+  /* ---------- 顶栏 ---------- */
+  .bilibili-header { position: fixed; top: 0; left: 0; right: 0; height: 48px; z-index: 110;
+    background-color: color-mix(in srgb, var(--vscode-editor-background) 70%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(15px); backdrop-filter: saturate(180%) blur(15px);
+    display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
+    border-bottom: 1px solid var(--border); }
+  .bilibili-header-left { display: flex; align-items: center; }
+  .bilibili-logo { display: flex; align-items: center; color: var(--vscode-foreground); cursor: default;
+    filter: drop-shadow(0 0 2px rgba(0, 161, 214, .3)); transition: filter .2s ease; }
+  .bilibili-logo:hover { filter: drop-shadow(0 0 4px rgba(0, 161, 214, .5)); }
+  .bilibili-logo svg { width: 60px; height: auto; display: block; }
+  .bilibili-header-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  /* 登录按钮（未登录，同 TouchFish：图标 + "登录" 文字按钮） */
+  .login-btn { display: flex; align-items: center; gap: 6px; background: transparent; border: none;
+    color: var(--vscode-foreground); font-size: 13px; cursor: pointer; padding: 6px 10px; border-radius: 8px;
+    transition: color .2s ease, background .2s ease; }
+  .login-btn:hover { color: var(--bili-blue); background: var(--vscode-list-hoverBackground); }
+  .login-btn svg { width: 15px; height: 15px; }
+  /* 已登录：头像 + 昵称 + 悬停下拉（退出登录） */
+  .user-wrap { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+    border-radius: 8px; cursor: pointer; min-width: 0; }
+  .user-face { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+  .user-name { font-size: 13px; color: var(--vscode-foreground); max-width: 120px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .user-dropdown { display: none; position: absolute; top: calc(100% + 6px); right: 0; min-width: 132px;
+    background-color: color-mix(in srgb, var(--vscode-editor-background) 70%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(15px); backdrop-filter: saturate(180%) blur(15px);
+    border: 1px solid var(--border); border-radius: 10px; padding: 5px; z-index: 300;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .3); }
+  .user-wrap:hover .user-dropdown { display: block; }
+  .user-dropdown-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px;
+    font-size: 13px; color: var(--vscode-foreground); cursor: pointer; transition: all .2s ease; white-space: nowrap; }
+  .user-dropdown-item:hover { color: var(--bili-blue); background: var(--vscode-list-hoverBackground); }
+  .user-dropdown-item svg { width: 14px; height: 14px; }
+
+  /* ---------- 扫码登录弹窗（白底卡片，同 B 站登录弹窗样式） ---------- */
+  .login-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1500;
+    display: none; align-items: center; justify-content: center; }
+  .login-modal { width: 300px; max-width: calc(100% - 32px); background: #fff; border-radius: 12px;
+    padding: 16px 18px 18px; color: #333; position: relative; box-shadow: 0 8px 32px rgba(0, 0, 0, .35); }
+  .login-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .login-modal-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: #18191c; }
+  .login-modal-title svg { width: 20px; height: 20px; color: var(--bili-blue); }
+  .login-close { width: 28px; height: 28px; border: none; border-radius: 50%; background: #f1f2f3;
+    color: #61666d; font-size: 16px; line-height: 1; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; transition: all .2s ease; }
+  .login-close:hover { background: var(--bili-pink); color: #fff; }
+  .login-qr-wrap { width: 220px; height: 220px; margin: 0 auto; background: #fff; border: 1px solid #e3e5e7;
+    border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .login-qr-wrap img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .login-status { text-align: center; font-size: 13px; color: #61666d; margin-top: 10px; min-height: 18px; }
+  .login-status.ok { color: #2ac864; }
+  .login-status.err { color: var(--bili-pink); }
+  .login-tip { text-align: center; font-size: 13px; color: #18191c; margin-top: 4px; }
+  .login-instructions { margin-top: 14px; padding-top: 12px; border-top: 1px solid #e3e5e7;
+    font-size: 12px; color: #9499a0; line-height: 1.7; }
+  .login-instructions ul { margin: 4px 0 0; padding-left: 18px; }
+
+  /* ---------- 标签页 ---------- */
+  .tabs { position: fixed; z-index: 100; width: 100%; top: 48px;
+    background-color: color-mix(in srgb, var(--vscode-editor-background) 70%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(15px); backdrop-filter: saturate(180%) blur(15px); }
+  .tabs-nav { display: flex; align-items: center; gap: 26px; padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
+  .tabs-nav::-webkit-scrollbar { display: none; }
+  .tab { position: relative; padding: 12px 0; font-size: 14px; color: var(--vscode-foreground); white-space: nowrap;
+    cursor: pointer; user-select: none; -webkit-user-select: none; transition: color .2s ease; }
+  .tab:hover { color: var(--bili-blue); }
+  .tab.active { color: var(--bili-blue); font-weight: 500; }
+  .tab.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 1px; background: var(--bili-blue); }
+  .tab-more { display: flex; align-items: center; color: var(--vscode-foreground); }
+  .tab-more svg { width: 18px; height: 18px; }
+
+  /* ---------- 视频流列表 ---------- */
+  .list { overflow-y: auto; height: 100vh; padding: 98px 5px 96px; }
+  .video-grid { display: flex; flex-direction: column; gap: 12px; }
+  @media screen and (min-width: 400px) {
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
   }
-  /* ---- 列表视图 ---- */
-  .cardlist { padding: 8px; display: flex; flex-direction: column; gap: 12px; }
-  .card { cursor: pointer; border-radius: 8px; overflow: hidden; background: rgba(128, 128, 128, 0.08); }
-  .card:hover { outline: 1px solid var(--vscode-focusBorder, #0e639c); }
-  .card.playing { outline: 1px solid var(--vscode-focusBorder, #0e639c); }
-  .cover { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; }
-  .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .cover .dur {
-    position: absolute; right: 6px; bottom: 6px; background: rgba(0, 0, 0, 0.7);
-    color: #fff; font-size: 11px; padding: 1px 5px; border-radius: 3px;
-  }
-  .card .info { padding: 8px 10px 10px; }
-  .card .t {
-    font-size: 13px; line-height: 1.4; margin-bottom: 4px;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  }
-  .card .sub { font-size: 11px; color: var(--vscode-descriptionForeground, #9aa0a6); display: flex; gap: 10px; flex-wrap: wrap; }
-  .empty { padding: 30px 12px; text-align: center; color: var(--vscode-descriptionForeground, #9aa0a6); font-size: 12px; }
-  .pagebar {
-    display: none; align-items: center; justify-content: center; gap: 12px;
-    padding: 8px 0 14px; font-size: 12px; color: var(--vscode-descriptionForeground, #9aa0a6);
-  }
-  .pagebar button {
-    background: var(--vscode-button-secondaryBackground, #3c3c3c);
-    color: var(--vscode-button-secondaryForeground, #d4d4d4);
-    border: none; border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
-  }
-  .pagebar button:disabled { opacity: 0.4; cursor: default; }
-  /* ---- 卡片内原位播放器：覆盖在封面位置，右上角关闭按钮 ---- */
-  .inline-player { position: absolute; inset: 0; z-index: 2; background: #000; }
-  .inline-player video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
-  .inline-player .close-btn {
-    position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; z-index: 3;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(0, 0, 0, 0.7); border: none; border-radius: 50%;
-    color: #fff; font-size: 15px; cursor: pointer; transition: all 0.2s ease;
-  }
-  .inline-player .close-btn:hover { background: #fb7299; transform: scale(1.1); }
-  /* 状态条（加载中/错误），叠加在播放画面底部 */
-  .player-status {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
-    padding: 4px 10px; font-size: 11px; display: none;
-    background: rgba(20, 20, 20, 0.82); color: #bbbbbb;
-  }
-  .player-status.err { background: rgba(120, 30, 30, 0.85); color: #ffd7d7; }
+  .video-card { position: relative; z-index: 0; }
+  .video-cover { position: relative; z-index: 0; isolation: isolate; overflow: hidden; border-radius: 16px; background: #000; }
+  .video-cover .cover-img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; cursor: pointer; }
+  .video-cover:hover .video-play-icon { opacity: 1; }
+  .video-play-icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #ffffffe6; opacity: 0; transition: opacity .2s ease; pointer-events: none; text-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+  .video-play-icon svg { width: 48px; height: 48px; }
+  .video-hover-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; opacity: 0; transition: opacity .2s ease; }
+  .video-cover:hover .video-hover-actions { opacity: 1; }
+  .video-action-btn { width: 28px; height: 28px; background: #000000b3; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; transition: all .2s ease; }
+  .video-action-btn:hover { background: var(--bili-blue); }
+  .video-action-btn svg { width: 14px; height: 14px; }
+  .video-stats-overlay { position: absolute; bottom: 8px; left: 8px; display: flex; gap: 12px;
+    color: #fff; font-size: 12px; text-shadow: 0 1px 2px rgba(0, 0, 0, .8); pointer-events: none; }
+  .video-stats-overlay span { display: flex; align-items: center; gap: 4px; }
+  .video-stats-overlay svg { width: 14px; height: 14px; }
+  .video-duration { position: absolute; bottom: 8px; right: 8px; background: #000000bf; color: #fff;
+    padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+  /* 直播卡片：红色"直播中"角标 */
+  .video-live-badge { position: absolute; bottom: 8px; right: 8px; background: var(--bili-pink); color: #fff;
+    padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .video-live-badge::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: #fff; margin-right: 5px; vertical-align: middle; }
+  /* ---------- 卡片原位播放器（点击封面后在原框内播放，同 TouchFish） ---------- */
+  .video-cover .video-player-container { position: relative; width: 100%; aspect-ratio: 16 / 9;
+    background: #000; overflow: hidden; border-radius: 16px; }
+  .video-player-container video { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; display: block; }
+  .video-player-loading { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #ffffffe6; z-index: 30; pointer-events: none;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, .5); }
+  .video-player-loading svg { width: 36px; height: 36px; }
+  .video-player-loading .spin { animation: rotate 1s linear infinite; }
+  .video-player-close { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px;
+    background: #000000b3; border: none; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; color: #fff; cursor: pointer; z-index: 40; transition: all .2s ease; }
+  .video-player-close:hover { background: var(--bili-pink); transform: scale(1.1); }
+  .video-player-close svg { width: 16px; height: 16px; }
+  .video-cover.playing .video-hover-actions { display: none; }
+  .video-title { padding: 8px 0; font-size: var(--app-font-size); line-height: 1.4; color: var(--vscode-foreground);
+    cursor: pointer; transition: color .2s ease; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .video-title:hover { color: var(--vscode-textLink-foreground); }
+  .video-footer { padding: 0 0 10px; display: flex; align-items: center; gap: 6px;
+    font-size: calc(var(--app-font-size) - 2px); color: var(--vscode-breadcrumb-foreground); }
+  .video-avatar, .avatar-fallback { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+  .avatar-fallback { display: flex; align-items: center; justify-content: center;
+    background: var(--vscode-button-secondaryBackground); color: var(--vscode-foreground); font-size: 11px; }
+  .video-author { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; cursor: pointer; transition: color .2s ease; }
+  .video-author:hover { color: var(--vscode-textLink-foreground); }
+  .video-dot { color: var(--vscode-descriptionForeground); }
+  .video-date { color: var(--vscode-descriptionForeground); white-space: nowrap; }
+
+  /* ---------- 分页 / 状态 ---------- */
+  .pagination { display: none; align-items: center; justify-content: center; gap: 10px;
+    padding: 2px 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+  .pagination button { background: color-mix(in srgb, var(--vscode-button-secondaryBackground) 40%, transparent);
+    color: var(--vscode-foreground); border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; cursor: pointer; font-size: 12px; }
+  .pagination button:hover:not(:disabled) { color: var(--bili-blue); border-color: var(--bili-blue); }
+  .pagination button:disabled { opacity: .4; cursor: default; }
+  .page-state { display: none; flex-direction: column; align-items: center; gap: 10px;
+    padding: 60px 0; color: var(--vscode-descriptionForeground); font-size: 13px; }
+  .page-state svg { width: 28px; height: 28px; color: var(--bili-blue); }
+  .page-state .login-link { color: var(--bili-blue); cursor: pointer; font-size: 13px; }
+  .page-state .login-link:hover { text-decoration: underline; }
+  /* 分区"加载更多"按钮 */
+  .load-more { display: none; margin: 4px auto 8px; padding: 7px 26px; border: 1px solid var(--border);
+    border-radius: 18px; background: color-mix(in srgb, var(--vscode-button-secondaryBackground) 40%, transparent);
+    color: var(--vscode-foreground); font-size: 13px; cursor: pointer; transition: all .2s ease; }
+  .load-more:hover { color: var(--bili-blue); border-color: var(--bili-blue); }
+  .spin { animation: rotate 1s linear infinite; }
+  @keyframes rotate { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+  /* ---------- 悬浮刷新按钮 ---------- */
+  .float-btn { position: fixed; right: 14px; bottom: 84px; width: 40px; height: 40px; border-radius: 50%; z-index: 1090;
+    border: 1px solid var(--border); color: var(--bili-pink); cursor: pointer;
+    background-color: color-mix(in srgb, var(--vscode-editor-background) 70%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(15px); backdrop-filter: saturate(180%) blur(15px);
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0, 0, 0, .25); }
+  .float-btn:hover { border-color: var(--bili-pink); }
+  .float-btn svg { width: 20px; height: 20px; }
+  .float-btn.spinning svg { animation: rotate 1s linear infinite; }
+
+  /* ---------- 轻提示 ---------- */
+  .toast { position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 40px);
+    background: #000000cc; color: #fff; font-size: 12px; padding: 8px 14px; border-radius: 8px;
+    z-index: 1300; display: none; text-align: center; }
+
 </style>
 </head>
 <body>
-<div id="listView">
-  <div class="cardlist" id="cardList"><div class="empty">正在加载推荐视频…</div></div>
-  <div class="pagebar" id="pageBar">
-    <button id="prevPage">上一页</button>
-    <span id="pageInfo"></span>
-    <button id="nextPage">下一页</button>
+  <!-- 顶栏：logo + 登录用户 -->
+  <header class="bilibili-header">
+    <div class="bilibili-header-left">
+      <span class="bilibili-logo" title="bilibili">
+        <svg viewBox="0 0 2299 1024" fill="currentColor" aria-hidden="true"><path d="M1775.840814 322.588002c6.0164 1.002733 53.144869-9.525967 55.150336-6.016401 3.0082 4.5123 24.065601 155.92504 18.550567 156.927774s-44.621635 10.027334-44.621635 10.027334c-3.0082-20.556034-28.577901-147.903173-29.079268-160.938707m75.205003-14.539634l20.556034 162.944174c10.5287-0.501367 53.144869-3.509567 57.155803-4.010934-6.0164-61.668103-16.545101-158.933241-16.545101-158.93324-20.054668-4.010934-41.112069-4.010934-61.166736 0m-40.610702 226.116376s92.752838-23.564234 126.344406-12.0328c17.046467 61.668103 48.131202 407.611118 51.139402 421.649386-21.057401 2.506833-90.246004 8.523234-95.761037 10.027333-4.5123-26.071068-81.72277-403.098818-81.722771-419.643919m343.436183-207.565809c5.515034 1.5041 54.648969-5.013667 55.150335-1.5041 1.002733 12.032801 6.0164 157.42914 0.501367 157.930507s-44.621635 4.010934-44.621635 4.010934c-1.002733-20.054668-12.032801-146.90044-11.030067-160.437341m75.70637-4.010933l4.010933 160.938707c10.5287 0 52.643502 2.506833 57.155803 2.005467-1.002733-61.668103 0-158.933241 0-158.933241-20.054668-3.509567-40.610702-5.013667-61.166736-4.010933m-64.676303 216.089043s94.758304-12.534167 126.845772 2.506833c7.019134 72.196803 6.0164 408.613852 7.019134 422.652119-21.558768 0-90.246004 1.002733-95.761038 2.005467-1.002733-26.071068-39.607968-410.619319-38.103868-427.164419m-220.099977-413.627519c54.648969 278.759879 96.262404 755.058234 97.766504 785.641602 0 0 43.117535 1.002733 91.750105 4.010934C2105.740095 614.383415 2070.644427 134.575493 2071.145794 119.033126c-12.032801-13.536901-126.344406 6.0164-126.344406 6.0164m-120.328005 659.297196c-10.5287-78.213204-290.291313-166.955108-447.720454-138.377206 0 0-19.553301-172.470141-27.073801-339.425248-6.517767-143.390873-1.002733-282.770813 0.501366-305.833681-10.5287-7.5205-123.837572 46.627102-185.004308 69.188603 0 0 73.199537 309.844614 126.344406 952.59671 0 0 84.730971 9.0246 230.12731-19.051934s317.365114-115.815705 302.825481-219.097244m-341.932083 140.88404l-24.566967-176.982441c6.0164-3.0082 156.927774 53.144869 172.971507 63.172203-2.506833 11.030067-148.40454 113.810238-148.40454 113.810238M610.664628 322.588002c6.0164 1.002733 53.144869-9.525967 55.150335-6.016401 3.0082 4.5123 24.065601 155.92504 18.550568 156.927774s-44.621635 10.027334-44.621635 10.027334c-3.0082-20.556034-28.577901-147.903173-29.079268-160.938707m75.205003-14.539634l20.556034 162.944174c10.5287-0.501367 53.144869-3.509567 57.155803-4.010934-6.517767-61.668103-16.545101-158.933241-16.545101-158.93324-20.054668-4.010934-41.112069-4.010934-61.166736 0m-40.610702 226.116376s92.752838-23.564234 126.344406-12.0328c17.046467 61.668103 48.131202 407.611118 51.139402 421.649386-21.057401 2.506833-90.246004 8.523234-95.761037 10.027333-4.5123-26.071068-81.72277-403.098818-81.722771-419.643919m343.436182-207.565809c5.515034 1.5041 54.648969-5.013667 55.150336-1.5041 1.002733 12.032801 6.0164 157.42914 0.501367 157.930507s-44.621635 4.010934-44.621635 4.010934c-1.002733-20.054668-11.531434-146.90044-11.030068-160.437341m75.706371-4.010933l4.010933 160.938707c10.5287 0 52.643502 2.506833 57.155803 2.005467-1.002733-61.668103 0-158.933241 0-158.933241-20.054668-3.509567-40.610702-4.5123-61.166736-4.010933m-64.676303 216.089043s94.758304-12.534167 126.845772 2.506833c7.019134 72.196803 6.0164 408.613852 7.019134 422.652119-21.558768 0-90.246004 1.002733-95.761038 2.005467-0.501367-26.071068-39.607968-410.619319-38.103868-427.164419m-220.099977-413.627519c54.648969 278.759879 96.262404 755.058234 97.766504 785.641602 0 0 43.117535 1.002733 91.750105 4.010934-28.577901-300.318647-63.67357-780.126569-63.172203-796.170303-12.032801-13.035534-126.344406 6.517767-126.344406 6.517767m-120.328005 659.297196c-10.5287-78.213204-290.291313-166.955108-447.720454-138.377206 0 0-19.553301-172.470141-27.073801-339.425248-6.517767-143.390873-1.002733-282.770813 0.501366-305.833681C174.475608-6.308547 61.166736 47.337689 0 69.89919c0 0 73.199537 309.844614 126.344406 952.59671 0 0 84.730971 9.0246 230.12731-19.051934s317.365114-115.815705 302.825481-219.097244m-341.932083 140.88404l-24.566967-176.982441c6.0164-3.0082 156.927774 53.144869 172.971507 63.172203-2.506833 11.030067-148.40454 113.810238-148.40454 113.810238"/></svg>
+      </span>
+    </div>
+    <div class="bilibili-header-right" id="userArea">
+      <!-- 未登录：登录按钮 -->
+      <button class="login-btn" id="loginBtn" title="扫码登录">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 1-9 9"/></svg>
+        <span>登录</span>
+      </button>
+      <!-- 已登录：头像 + 昵称，悬停显示退出登录 -->
+      <div class="user-wrap" id="userWrap" style="display:none">
+        <img class="user-face" id="userFace" alt="">
+        <span class="user-name" id="userName"></span>
+        <div class="user-dropdown" id="userDropdown">
+          <div class="user-dropdown-item" id="logoutBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 1-9 9"/></svg>
+            <span>退出登录</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 分区标签页 -->
+  <nav class="tabs">
+    <div class="tabs-nav">
+      <div class="tab active" data-tab="recommend">推荐</div>
+      <div class="tab" data-tab="popular">热门</div>
+      <div class="tab" data-tab="live">直播</div>
+      <div class="tab" data-tab="watchlater">待看</div>
+      <div class="tab tab-more" id="tabMore">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 视频流 -->
+  <main class="list" id="list">
+    <div class="pagination" id="pagination">
+      <button id="pagePrev">上一页</button>
+      <span id="pageInfo"></span>
+      <button id="pageNext">下一页</button>
+    </div>
+    <div class="video-grid" id="grid"></div>
+    <button class="load-more" id="loadMore">加载更多</button>
+    <div class="page-state" id="pageState"></div>
+  </main>
+
+  <!-- 悬浮刷新按钮 -->
+  <button class="float-btn" id="refreshBtn" title="刷新推荐">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-1.76-4.24L13 11h7V4l-2.35 2.35z"/></svg>
+  </button>
+
+  <!-- 轻提示 -->
+  <div class="toast" id="toast"></div>
+
+  <!-- 扫码登录弹窗 -->
+  <div class="login-mask" id="loginMask">
+    <div class="login-modal">
+      <div class="login-modal-header">
+        <span class="login-modal-title">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8zM5 5v4h4V5H5zm10 0v4h4V5h-4zM5 15v4h4v-4H5zm10 0v4h4v-4h-4z"/></svg>
+          B站扫码登录
+        </span>
+        <button class="login-close" id="loginClose" title="关闭">×</button>
+      </div>
+      <div class="login-qr-wrap"><img id="loginQrImg" alt="登录二维码"></div>
+      <div class="login-status" id="loginStatus">正在获取二维码…</div>
+      <div class="login-tip">请使用B站APP扫码登录</div>
+      <div class="login-instructions">
+        <div>登录说明:</div>
+        <ul>
+          <li>请使用 Bilibili APP 扫描二维码</li>
+          <li>扫码后需要在手机上确认授权</li>
+          <li>二维码有效期约 3 分钟，过期后自动刷新</li>
+        </ul>
+      </div>
+    </div>
   </div>
-</div>
-<!-- 原位播放器：点击卡片时由脚本移入该卡片的封面区域 -->
-<div class="inline-player" id="inlinePlayer" style="display:none">
-  <video id="player" preload="auto" __AUTO_START__></video>
-  <button class="close-btn" id="closeBtn" title="关闭播放">✕</button>
-  <div class="player-status" id="playerStatus"></div>
-</div>
+
+  <!-- hls.js（直播 HLS 流播放，由 extension 注入实现） -->
+  <script>__HLS_LIB__</script>
+
 <script>
   const vscode = acquireVsCodeApi();
-  const player = document.getElementById('player');
-  const inlinePlayer = document.getElementById('inlinePlayer');
-  const playerStatus = document.getElementById('playerStatus');
-  let currentBvid = '';
-  let pendingBvid = '';
-  let playingCard = null;
-  let pendingPlayBvid = '';
+  const AUTO_PLAY = '__AUTO_START__' === 'autoplay';
 
-  function showStatus(text, isError) {
-    playerStatus.textContent = text;
-    playerStatus.classList.toggle('err', Boolean(isError));
-    playerStatus.style.display = 'block';
-  }
-  function hideStatus() {
-    playerStatus.style.display = 'none';
-  }
-  function esc(text) {
-    return String(text == null ? '' : text)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const $ = (id) => document.getElementById(id);
+  const grid = $('grid');
+  const list = $('list');
+  const pageState = $('pageState');
+  const pagination = $('pagination');
+  const pageInfo = $('pageInfo');
+  const pagePrevBtn = $('pagePrev');
+  const pageNextBtn = $('pageNext');
+  const toastEl = $('toast');
+  const refreshBtn = $('refreshBtn');
+  const loadMoreBtn = $('loadMore');
+  const loginBtn = $('loginBtn');
+  const userWrap = $('userWrap');
+  const userFace = $('userFace');
+  const userName = $('userName');
+  const logoutBtn = $('logoutBtn');
+  const loginMask = $('loginMask');
+  const loginQrImg = $('loginQrImg');
+  const loginStatus = $('loginStatus');
+  const loginClose = $('loginClose');
+
+  // 图标
+  const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8c0-.9 1-1.5 1.8-1L20 11.1c.7.4.7 1.4 0 1.8L8.8 20.2c-.8.5-1.8-.1-1.8-1V4.8z"/></svg>';
+  const ICON_BUBBLE = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.6 4h16.8a1.6 1.6 0 0 1 1.6 1.6v10.8a1.6 1.6 0 0 1-1.6 1.6h-9.9l-4.9 3.9a.9.9 0 0 1-1.4-.7V18h-.6a1.6 1.6 0 0 1-1.6-1.6V5.6A1.6 1.6 0 0 1 3.6 4z"/></svg>';
+  const ICON_EXTERNAL = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42L17.59 5H14V3zM5 5h6v2H7v10h10v-4h2v6H5V5z"/></svg>';
+  const ICON_PLAY_CIRCLE = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#00a1d6"/><path d="M10 8.2v7.6c0 .6.7 1 1.2.7l6-3.8c.5-.3.5-1 0-1.3l-6-3.8c-.5-.4-1.2 0-1.2.6z" fill="#fff"/></svg>';
+  const ICON_SPIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3a9 9 0 1 1-9 9"/></svg>';
+
+  // 状态
+  let entries = [];
+  let meta = { searchMode: false, page: 1, totalPages: 1, canPrev: false, canNext: false };
+  let activeTab = 'recommend';
+  let toastTimer = null;
+  // 分区状态：已加载数据与翻页游标（热门/直播 pn 翻页，待看前端切片）
+  const tabState = {};
+  let tabLoading = false;
+  // 原位播放状态：当前播放卡片与流挂载
+  let playing = null; // { bvid | roomId, entry, card, video, loading, hls }
+
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 2600);
   }
 
-  function renderEntries(entries, meta) {
-    const list = document.getElementById('cardList');
-    if (!entries.length) {
-      list.innerHTML = '<div class="empty">暂无视频，点击上方「刷新视频」加载</div>';
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) { node.className = className; }
+    if (text !== undefined) { node.textContent = text; }
+    return node;
+  }
+
+  function makeIcon(markup) {
+    const holder = document.createElement('span');
+    holder.style.display = 'inline-flex';
+    holder.innerHTML = markup;
+    return holder.firstChild;
+  }
+
+  function buildAvatar(entry) {
+    const initial = (entry.uploader || 'U').charAt(0);
+    if (entry.uploaderFace) {
+      const img = el('img', 'video-avatar');
+      img.src = entry.uploaderFace;
+      img.loading = 'lazy';
+      img.addEventListener('error', () => {
+        img.replaceWith(el('span', 'avatar-fallback', initial));
+      });
+      return img;
+    }
+    return el('span', 'avatar-fallback', initial);
+  }
+
+  function buildCard(entry) {
+    const card = el('div', 'video-card');
+    card.dataset.bvid = entry.bvid;
+    const isLive = Boolean(entry.isLive);
+    if (isLive && entry.roomId) {
+      card.dataset.roomId = String(entry.roomId);
+    }
+
+    const cover = el('div', 'video-cover');
+    const img = el(entry.cover ? 'img' : 'div', 'cover-img');
+    if (entry.cover) {
+      img.src = entry.cover;
+      img.loading = 'lazy';
+      img.addEventListener('error', () => { img.style.visibility = 'hidden'; });
+    }
+    // 直播卡片与视频卡片都在原框内播放
+    if (isLive) {
+      img.addEventListener('click', () => playLive(entry));
     } else {
-      list.innerHTML = entries.map((v) => (
-        '<div class="card" data-bvid="' + esc(v.bvid) + '">' +
-          '<div class="cover">' +
-            (v.cover ? '<img src="' + esc(v.cover) + '" referrerpolicy="no-referrer" loading="lazy" alt="">' : '') +
-            (v.durationText ? '<span class="dur">' + esc(v.durationText) + '</span>' : '') +
-          '</div>' +
-          '<div class="info">' +
-            '<div class="t">' + esc(v.title) + '</div>' +
-            '<div class="sub">' +
-              '<span>@' + esc(v.uploader) + '</span>' +
-              '<span>播放 ' + esc(v.playCountText) + '</span>' +
-              '<span>弹幕 ' + esc(v.danmakuCountText) + '</span>' +
-            '</div>' +
-          '</div>' +
-        '</div>'
-      )).join('');
+      img.addEventListener('click', () => playEntry(entry.bvid));
     }
-    const pageBar = document.getElementById('pageBar');
-    if (meta && meta.searchMode && meta.totalPages > 1) {
-      pageBar.style.display = 'flex';
-      document.getElementById('pageInfo').textContent = '第 ' + meta.page + ' / ' + meta.totalPages + ' 页';
-      document.getElementById('prevPage').disabled = !meta.canPrev;
-      document.getElementById('nextPage').disabled = !meta.canNext;
+    cover.appendChild(img);
+
+    const playIcon = el('div', 'video-play-icon');
+    playIcon.appendChild(makeIcon(ICON_PLAY));
+    cover.appendChild(playIcon);
+
+    const actions = el('div', 'video-hover-actions');
+    const openBtn = el('div', 'video-action-btn');
+    openBtn.title = '在B站打开';
+    openBtn.appendChild(makeIcon(ICON_EXTERNAL));
+    const openUrl = isLive ? (entry.roomUrl || entry.pageUrl) : entry.pageUrl;
+    openBtn.addEventListener('click', (e) => { e.stopPropagation(); if (openUrl) { openExternal(openUrl); } });
+    actions.appendChild(openBtn);
+    cover.appendChild(actions);
+
+    const stats = el('div', 'video-stats-overlay');
+    const playStat = el('span');
+    playStat.appendChild(makeIcon(ICON_PLAY));
+    playStat.appendChild(document.createTextNode(isLive ? (entry.playCountText + '人在线') : entry.playCountText));
+    stats.appendChild(playStat);
+    if (!isLive && entry.danmakuCountText) {
+      const dmStat = el('span');
+      dmStat.appendChild(makeIcon(ICON_BUBBLE));
+      dmStat.appendChild(document.createTextNode(entry.danmakuCountText));
+      stats.appendChild(dmStat);
+    }
+    cover.appendChild(stats);
+
+    if (isLive) {
+      cover.appendChild(el('div', 'video-live-badge', '直播中'));
     } else {
-      pageBar.style.display = 'none';
+      cover.appendChild(el('div', 'video-duration', entry.durationText));
     }
-    if (pendingPlayBvid) {
-      const bvid = pendingPlayBvid;
-      pendingPlayBvid = '';
-      playByBvid(bvid); // 外部指定的视频可能早于列表渲染到达，此处补播
+
+    const title = el('div', 'video-title', entry.title);
+    title.title = entry.title;
+    title.addEventListener('click', () => {
+      if (isLive) { playLive(entry); } else { playEntry(entry.bvid); }
+    });
+
+    const footer = el('div', 'video-footer');
+    footer.appendChild(buildAvatar(entry));
+    footer.appendChild(el('span', 'video-author', entry.uploader));
+    if (entry.dateText) {
+      footer.appendChild(el('span', 'video-dot', '·'));
+      footer.appendChild(el('span', 'video-date', entry.dateText));
     }
+
+    card.appendChild(cover);
+    card.appendChild(title);
+    card.appendChild(footer);
+    return card;
   }
 
-  /* 停止播放：释放视频流，封面恢复显示 */
-  function stopPlayback() {
-    pendingBvid = '';
-    currentBvid = '';
-    player.pause();
-    player.removeAttribute('src');
-    player.load();
-    inlinePlayer.style.display = 'none';
-    hideStatus();
-    if (playingCard) {
-      playingCard.classList.remove('playing');
-      playingCard = null;
-    }
+  function showLoadingState() {
+    pageState.style.display = 'flex';
+    pageState.innerHTML = '';
+    const spinner = makeIcon(ICON_SPIN);
+    spinner.classList.add('spin');
+    pageState.appendChild(spinner);
+    pageState.appendChild(el('span', null, '正在加载推荐视频…'));
   }
 
-  /* 在指定卡片内原位播放 */
-  function playCard(card) {
-    if (playingCard === card) return; // 该卡片正在播放
-    stopPlayback();
-    playingCard = card;
-    card.classList.add('playing');
-    const cover = card.querySelector('.cover');
-    cover.insertBefore(inlinePlayer, cover.firstChild);
-    inlinePlayer.style.display = 'block';
-    showStatus('正在获取视频流…', false);
-    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    pendingBvid = card.dataset.bvid;
-    vscode.postMessage({ command: 'feed:play', bvid: pendingBvid });
-  }
-  function playByBvid(bvid) {
-    if (!bvid) return;
-    const card = document.querySelector('.card[data-bvid="' + bvid + '"]');
-    if (card) {
-      playCard(card);
+  function renderList() {
+    closePlayer(); // 列表将重绘，先释放原位播放器
+    grid.textContent = '';
+    for (const entry of entries) {
+      grid.appendChild(buildCard(entry));
+    }
+
+    const showPagination = meta.searchMode && (meta.canPrev || meta.canNext);
+    pagination.style.display = showPagination ? 'flex' : 'none';
+    if (showPagination) {
+      pageInfo.textContent = '第 ' + meta.page + ' / ' + meta.totalPages + ' 页';
+      pagePrevBtn.disabled = !meta.canPrev;
+      pageNextBtn.disabled = !meta.canNext;
+    }
+
+    const pageKey = String(meta.searchMode) + '|' + meta.page;
+    if (pageKey !== lastPageKey) {
+      lastPageKey = pageKey;
+      list.scrollTop = 0;
+    }
+
+    if (entries.length === 0) {
+      pageState.style.display = 'flex';
+      pageState.innerHTML = '';
+      pageState.appendChild(el('span', null, '暂无内容，点击右下角按钮刷新'));
     } else {
-      pendingPlayBvid = bvid; // 列表尚未渲染，待条目到达后补播
+      pageState.style.display = 'none';
+      pageState.innerHTML = '';
     }
   }
 
-  document.getElementById('cardList').addEventListener('click', (event) => {
-    const card = event.target.closest('.card');
-    if (!card || !card.dataset.bvid) return;
-    playCard(card);
-  });
-  document.getElementById('closeBtn').addEventListener('click', (event) => {
-    event.stopPropagation();
-    stopPlayback();
-  });
-  document.getElementById('prevPage').addEventListener('click', () => {
-    vscode.postMessage({ command: 'feed:prevPage' });
-  });
-  document.getElementById('nextPage').addEventListener('click', () => {
-    vscode.postMessage({ command: 'feed:nextPage' });
+  // ----- 标签页切换与分区加载 -----
+  function setTabLoadingHint(text) {
+    pagination.style.display = 'none';
+    loadMoreBtn.style.display = 'none';
+    pageState.style.display = 'flex';
+    pageState.innerHTML = '';
+    const spinner = makeIcon(ICON_SPIN);
+    spinner.classList.add('spin');
+    pageState.appendChild(spinner);
+    pageState.appendChild(el('span', null, text));
+  }
+
+  function setPageStateText(text, opts) {
+    const options = opts || {};
+    loadMoreBtn.style.display = 'none';
+    pageState.style.display = 'flex';
+    pageState.innerHTML = '';
+    pageState.appendChild(el('span', null, text));
+    if (options.showLogin) {
+      const link = el('span', 'login-link', '去登录');
+      link.addEventListener('click', openLoginModal);
+      pageState.appendChild(link);
+    }
+  }
+
+  /** 请求分区数据（append=true 表示加载下一页追加） */
+  function loadTab(name, append) {
+    if (tabLoading) { return; }
+    tabLoading = true;
+    const st = tabState[name] || {};
+    vscode.postMessage({
+      command: 'feed:loadTab',
+      tab: name,
+      page: append ? (st.page || 1) + 1 : 1,
+      append: Boolean(append),
+    });
+  }
+
+  function renderTabList(name, keepScroll) {
+    const st = tabState[name] || {};
+    const isNewRender = !keepScroll;
+    if (isNewRender) {
+      closePlayer(); // 整体重绘前释放原位播放器
+      grid.textContent = '';
+    }
+    const allEntries = st.entries || [];
+    // 追加模式：仅渲染新增部分，不打断正在原位播放的视频
+    for (let i = isNewRender ? 0 : grid.children.length; i < allEntries.length; i++) {
+      grid.appendChild(buildCard(allEntries[i]));
+    }
+    pagination.style.display = 'none';
+    if (st.hasMore) {
+      loadMoreBtn.style.display = 'block';
+      loadMoreBtn.disabled = false;
+      loadMoreBtn.textContent = '加载更多';
+    } else {
+      loadMoreBtn.style.display = 'none';
+    }
+    if (!keepScroll) {
+      list.scrollTop = 0;
+    }
+    if (!st.entries || st.entries.length === 0) {
+      if (st.needLogin) {
+        setPageStateText('登录后可查看该分区内容', { showLogin: true });
+      } else if (st.error) {
+        setPageStateText('加载失败：' + st.error);
+      } else {
+        setPageStateText('暂无内容');
+      }
+    } else {
+      pageState.style.display = 'none';
+      pageState.innerHTML = '';
+    }
+  }
+
+  document.querySelectorAll('.tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const name = tab.dataset.tab;
+      if (!name) {
+        toast('更多分区暂未开放');
+        return;
+      }
+      activeTab = name;
+      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
+      if (activeTab === 'recommend') {
+        loadMoreBtn.style.display = 'none';
+        renderList();
+        return;
+      }
+      const st = tabState[activeTab];
+      if (st && st.entries && st.entries.length) {
+        renderTabList(activeTab);
+      } else {
+        setTabLoadingHint('正在加载' + (tab.textContent || '').trim() + '…');
+        loadTab(activeTab, false);
+      }
+    });
   });
 
-  player.volume = __VOLUME__;
-  player.controls = true;
-  player.addEventListener('playing', hideStatus);
-  player.addEventListener('error', () => {
-    showStatus('视频流加载出错（链接可能已失效），可点击标题栏搜索换一个视频', true);
+  loadMoreBtn.addEventListener('click', () => {
+    if (tabLoading) { return; }
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = '加载中…';
+    loadTab(activeTab, true);
   });
 
+  // ----- 原位播放：点击卡片后在原封面框内播放（同 TouchFish），关闭后恢复封面 -----
+  function currentListEntries() {
+    return activeTab === 'recommend' ? entries : ((tabState[activeTab] || {}).entries || []);
+  }
+
+  function findEntryData(bvid) {
+    return currentListEntries().find((item) => item.bvid === bvid) || null;
+  }
+
+  /** 关闭当前原位播放器并恢复封面卡片 */
+  function closePlayer() {
+    if (!playing) { return; }
+    const { card, entry, video, hls } = playing;
+    if (hls) {
+      hls.destroy();
+    }
+    if (video) {
+      video.pause();
+      video.removeAttribute('src');
+      try { video.load(); } catch (e) { /* 忽略释放异常 */ }
+    }
+    // 若卡片仍在列表中（未被重绘），重建卡片恢复封面
+    if (card && card.isConnected && entry) {
+      card.replaceWith(buildCard(entry));
+    }
+    playing = null;
+  }
+
+  /** 把卡片封面替换为播放器容器，返回 { video, loading } */
+  function replaceCoverWithPlayer(card) {
+    const cover = card.querySelector('.video-cover');
+    cover.classList.add('playing');
+    cover.textContent = '';
+    const container = el('div', 'video-player-container');
+    const video = document.createElement('video');
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.volume = __VOLUME__;
+    const loading = el('div', 'video-player-loading');
+    const spinner = makeIcon(ICON_SPIN);
+    spinner.classList.add('spin');
+    loading.appendChild(spinner);
+    const closeBtn = el('button', 'video-player-close');
+    closeBtn.title = '关闭播放器';
+    closeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closePlayer();
+    });
+    container.appendChild(video);
+    container.appendChild(loading);
+    container.appendChild(closeBtn);
+    cover.appendChild(container);
+    return { video, loading };
+  }
+
+  /** 在卡片内播放普通视频：先原位挂载，再向宿主请求播放地址 */
+  function playEntry(bvid) {
+    if (!bvid) { return; }
+    const card = grid.querySelector(`.video-card[data-bvid="${bvid}"]`);
+    if (!card) {
+      toast('该视频不在当前列表中');
+      return;
+    }
+    if (playing && playing.bvid === bvid) { return; }
+    const entry = findEntryData(bvid) || (playing && playing.entry && playing.entry.bvid === bvid ? playing.entry : null);
+    closePlayer();
+    if (!entry) {
+      toast('视频数据不可用');
+      return;
+    }
+    const mount = replaceCoverWithPlayer(card);
+    playing = { bvid, entry, card, video: mount.video, loading: mount.loading, hls: null };
+    vscode.postMessage({ command: 'feed:play', bvid: bvid });
+  }
+
+  /** 在卡片内播放直播（HLS 流，hls.js 挂载） */
+  function playLive(entry) {
+    if (!entry || !entry.roomId) {
+      openExternal(entry && entry.roomUrl);
+      return;
+    }
+    if (playing && playing.roomId === entry.roomId) { return; }
+    const target = findLiveCard(entry.roomId);
+    if (!target) {
+      toast('该直播间不在当前列表中');
+      return;
+    }
+    closePlayer();
+    const mount = replaceCoverWithPlayer(target);
+    playing = { roomId: entry.roomId, entry, card: target, video: mount.video, loading: mount.loading, hls: null };
+    mount.loading.innerHTML = ICON_PLAY_CIRCLE;
+    vscode.postMessage({ command: 'feed:playLive', roomId: entry.roomId });
+  }
+
+  /** 通过直播间号查找对应卡片 */
+  function findLiveCard(roomId) {
+    const wanted = String(roomId);
+    const cards = grid.querySelectorAll('.video-card');
+    for (const node of cards) {
+      if (String(node.dataset.roomId || '') === wanted) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  /** 用 hls.js 或原生能力挂载直播 HLS 流 */
+  function attachLiveStream(video, url) {
+    if (window.Hls && window.Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      return hls;
+    }
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      return null;
+    }
+    throw new Error('当前环境不支持播放直播流');
+  }
+
+  function handleStreamReady(data) {
+    if (!playing || playing.bvid !== data.entry.bvid) { return; } // 卡片可能已被关闭/切换
+    const url = data.streamUrls && data.streamUrls[0];
+    if (!url) {
+      playing.loading.innerHTML = ICON_PLAY_CIRCLE;
+      toast('未能取得可用的播放地址');
+      return;
+    }
+    playing.video.controls = true;
+    playing.video.src = url;
+    playing.loading.style.display = 'none';
+    playing.video.addEventListener('waiting', () => {
+      playing.loading.innerHTML = ICON_SPIN;
+      playing.loading.style.display = 'flex';
+    });
+    playing.video.addEventListener('playing', () => {
+      playing.loading.style.display = 'none';
+    });
+    playing.video.addEventListener('error', () => {
+      playing.loading.innerHTML = ICON_PLAY_CIRCLE;
+      playing.loading.style.display = 'flex';
+      toast('视频流加载出错，可点击「在B站打开」观看');
+    });
+    if (AUTO_PLAY) {
+      playing.video.play().catch(() => {});
+    }
+  }
+
+  function handleLiveStreamReady(data) {
+    if (!playing || playing.roomId !== data.roomId) { return; }
+    const url = data.streamUrls && data.streamUrls[0];
+    if (!url) {
+      playing.loading.innerHTML = ICON_PLAY_CIRCLE;
+      toast('未能取得可用的直播流地址');
+      return;
+    }
+    try {
+      playing.hls = attachLiveStream(playing.video, url);
+      playing.loading.style.display = 'none';
+      if (AUTO_PLAY) {
+        playing.video.play().catch(() => {});
+      }
+    } catch (e) {
+      playing.loading.innerHTML = ICON_PLAY_CIRCLE;
+      toast('直播流播放失败：' + (e.message || '未知错误'));
+    }
+  }
+
+  function handleStreamError(msg) {
+    if (msg.bvid && playing && playing.bvid !== msg.bvid) { return; }
+    if (playing) {
+      playing.loading.innerHTML = ICON_PLAY_CIRCLE;
+      playing.loading.style.display = 'flex';
+    }
+    toast(msg.cookieExpired
+      ? 'Cookie 失效或未配置，请先设置 Cookie'
+      : ('播放失败：' + (msg.message || '未知错误')));
+  }
+
+  function handleLiveStreamError(msg) {
+    if (playing && playing.roomId && msg.roomId && playing.roomId !== msg.roomId) { return; }
+    if (playing) {
+      playing.loading.innerHTML = ICON_PLAY_CIRCLE;
+      playing.loading.style.display = 'flex';
+    }
+    toast('直播播放失败：' + (msg.message || '未知错误'));
+  }
+
+  function openExternal(url) {
+    if (!url) { return; }
+    vscode.postMessage({ command: 'feed:openOnSite', url: url });
+  }
+
+  // ----- 用户区与扫码登录 -----
+  function applyUser(user) {
+    if (user && user.face) {
+      loginBtn.style.display = 'none';
+      userWrap.style.display = 'flex';
+      userFace.src = user.face;
+      userFace.onerror = () => { userWrap.style.display = 'none'; loginBtn.style.display = 'flex'; };
+      userName.textContent = user.uname || '';
+    } else {
+      userWrap.style.display = 'none';
+      loginBtn.style.display = 'flex';
+    }
+  }
+
+  function setLoginStatus(text, kind) {
+    loginStatus.textContent = text;
+    loginStatus.className = 'login-status' + (kind ? ' ' + kind : '');
+  }
+
+  function openLoginModal() {
+    loginQrImg.src = '';
+    setLoginStatus('正在获取二维码…');
+    loginMask.style.display = 'flex';
+    vscode.postMessage({ command: 'feed:loginStart' });
+  }
+
+  function closeLoginModal() {
+    loginMask.style.display = 'none';
+    vscode.postMessage({ command: 'feed:loginCancel' });
+  }
+
+  loginBtn.addEventListener('click', openLoginModal);
+  loginClose.addEventListener('click', closeLoginModal);
+  loginMask.addEventListener('click', (e) => {
+    if (e.target === loginMask) { closeLoginModal(); }
+  });
+  logoutBtn.addEventListener('click', () => {
+    vscode.postMessage({ command: 'feed:logout' });
+    toast('已退出登录');
+  });
+
+  // ----- 刷新 / 分页 -----
+  refreshBtn.addEventListener('click', () => {
+    refreshBtn.classList.add('spinning');
+    vscode.postMessage({ command: 'feed:refresh' });
+    setTimeout(() => refreshBtn.classList.remove('spinning'), 3000);
+  });
+
+  pagePrevBtn.addEventListener('click', () => vscode.postMessage({ command: 'feed:prevPage' }));
+  pageNextBtn.addEventListener('click', () => vscode.postMessage({ command: 'feed:nextPage' }));
+
+  // ----- 宿主消息 -----
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (!msg || typeof msg.command !== 'string') { return; }
-    if (msg.command === 'feed:entries') {
-      renderEntries(msg.entries || [], msg.meta || {});
-    } else if (msg.command === 'feed:playRequest') {
-      playByBvid(msg.bvid); // 外部命令（如随机播放）指定的视频
-    } else if (msg.command === 'feed:playerData') {
-      const entry = msg.entry || {};
-      if (!pendingBvid || entry.bvid !== pendingBvid) { return; } // 已停止/切换视频，丢弃过期响应
-      currentBvid = entry.bvid;
-      const url = msg.streamUrls && msg.streamUrls[0];
-      if (url) {
-        player.src = url;
-        player.play().catch(() => {});
+    switch (msg.command) {
+      case 'feed:entries': {
+        entries = Array.isArray(msg.entries) ? msg.entries : [];
+        meta = msg.meta || meta;
+        refreshBtn.classList.remove('spinning');
+        if (activeTab === 'recommend') { renderList(); }
+        if (pendingPlay) {
+          const bvid = pendingPlay;
+          pendingPlay = '';
+          playEntry(bvid);
+        }
+        break;
       }
-    } else if (msg.command === 'feed:playerError') {
-      showStatus(msg.cookieExpired
-        ? 'Cookie 失效或未配置，请点击标题栏齿轮设置。'
-        : ('播放失败：' + (msg.message || '未知错误')), true);
+      case 'feed:playerData':
+        handleStreamReady(msg);
+        break;
+      case 'feed:playerError':
+        handleStreamError(msg);
+        break;
+      case 'feed:liveStreamReady':
+        handleLiveStreamReady(msg);
+        break;
+      case 'feed:liveStreamError':
+        handleLiveStreamError(msg);
+        break;
+      case 'feed:playRequest': {
+        const bvid = msg.bvid;
+        if (entries.some((item) => item.bvid === bvid)) {
+          playEntry(bvid);
+        } else {
+          pendingPlay = bvid;
+        }
+        break;
+      }
+      case 'feed:userInfo': {
+        applyUser(msg.user);
+        break;
+      }
+      case 'feed:tabData': {
+        tabLoading = false;
+        const tab = msg.tab;
+        if (!tab) { break; }
+        const prev = tabState[tab] || { entries: [] };
+        const incoming = Array.isArray(msg.entries) ? msg.entries : [];
+        tabState[tab] = {
+          entries: msg.append ? (prev.entries || []).concat(incoming) : incoming,
+          page: msg.page || 1,
+          hasMore: Boolean(msg.hasMore),
+          needLogin: Boolean(msg.needLogin),
+          error: msg.error || '',
+        };
+        if (tab === activeTab) {
+          renderTabList(tab, Boolean(msg.append));
+        }
+        break;
+      }
+      case 'feed:loginQr':
+        loginQrImg.src = msg.qrImageUrl || '';
+        setLoginStatus('等待扫码…');
+        break;
+      case 'feed:loginState':
+        if (msg.state === 'confirmed') {
+          setLoginStatus('已扫码，请在手机上确认', 'ok');
+        } else {
+          setLoginStatus('等待扫码…');
+        }
+        break;
+      case 'feed:loginSuccess':
+        closeLoginModal();
+        toast('登录成功，推荐列表已按账号个性化加载');
+        break;
+      case 'feed:loginError':
+        setLoginStatus('登录失败：' + (msg.message || '未知错误'), 'err');
+        break;
+      default:
+        break;
     }
   });
 
+  // 初始加载
+  showLoadingState();
   vscode.postMessage({ command: 'feed:requestEntries' });
 </script>
 </body>

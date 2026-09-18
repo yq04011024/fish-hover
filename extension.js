@@ -23,6 +23,23 @@ const ENDPOINT_RECOMMEND_RCMD =
 const ENDPOINT_SEARCH = 'https://api.bilibili.com/x/web-interface/search/type';
 const ENDPOINT_VIDEO_INFO = 'https://api.bilibili.com/x/web-interface/view';
 const ENDPOINT_PLAY_URL = 'https://api.bilibili.com/x/player/wbi/playurl';
+const ENDPOINT_NAV = 'https://api.bilibili.com/x/web-interface/nav';
+// 分区接口（热门 / 直播 / 待看）
+const ENDPOINT_POPULAR = 'https://api.bilibili.com/x/web-interface/popular';
+const ENDPOINT_LIVE_FEED = 'https://api.live.bilibili.com/xlive/web-interface/v1/webMain/getPage';
+const ENDPOINT_LIVE_PLAY_URL = 'https://api.live.bilibili.com/room/v1/Room/playUrl';
+const ENDPOINT_WATCHLATER = 'https://api.bilibili.com/x/v2/history/toview/web';
+// 扫码登录（generate 取 url+qrcode_key，poll 轮询状态，成功后从响应 Set-Cookie 提取登录态）
+const ENDPOINT_QR_GENERATE = 'https://passport.bilibili.com/x/passport-login/web/qrcode/generate';
+const ENDPOINT_QR_POLL = 'https://passport.bilibili.com/x/passport-login/web/qrcode/poll';
+const QR_IMAGE_SERVICE = 'https://api.qrserver.com/v1/create-qr-code/?data=';
+const LOGIN_POLL_INTERVAL_MS = 2000;
+// 二维码轮询状态码（passport poll 接口 data.code）
+const QR_STATE_SUCCESS = 0;
+const QR_STATE_EXPIRED = 86038;
+const QR_STATE_CONFIRMED = 86090; // 已扫码，待手机确认
+const QR_STATE_NOT_SCANNED = 86101;
+const WATCHLATER_PAGE_SIZE = 12; // 待看分区前端切片页大小（接口一次返回全量）
 
 // Cookie 失效类错误码
 const COOKIE_EXPIRED_CODES = new Set([-101, -412]);
@@ -84,6 +101,28 @@ function stripHighlightTags(text) {
 
 function isCookieExpiredCode(code) {
 	return COOKIE_EXPIRED_CODES.has(code);
+}
+
+/**
+ * 从登录成功响应中提取 Set-Cookie 并拼接为 "name=value; ..." 形式的 Cookie 串
+ * （优先用 undici 的 getSetCookie()，逐条取第一段 name=value）
+ */
+function extractCookiePairs(response) {
+	try {
+		let rawCookies = [];
+		if (response && typeof response.headers.getSetCookie === 'function') {
+			rawCookies = response.headers.getSetCookie();
+		} else if (response && response.headers && response.headers.get('set-cookie')) {
+			rawCookies = [response.headers.get('set-cookie')];
+		}
+		const pairs = rawCookies
+			.map((cookie) => String(cookie).split(';')[0].trim())
+			.filter((pair) => pair && pair.includes('='));
+		return Array.from(new Set(pairs)).join('; ');
+	} catch (error) {
+		console.error('[bili-hover-viewer] 提取登录 Cookie 失败:', error);
+		return '';
+	}
 }
 
 /** HTML 文本转义（用于伪装文件内容注入 webview） */
@@ -180,7 +219,8 @@ function syncSidebarTitleFromConfig(context) {
  * 统一的视频条目：来自推荐流 / 搜索 / 兜底示例的归一化结果
  */
 class VideoEntry {
-	constructor({ bvid, avid, cid, title, uploader, uploaderFace, cover, durationSec, summary, playCount, danmakuCount }) {
+	constructor({ bvid, avid, cid, title, uploader, uploaderFace, cover, durationSec, summary, playCount, danmakuCount, pubdate }) {
+		this.pubdate = pubdate || 0; // 发布时间（unix 秒）
 		this.bvid = bvid || '';
 		this.avid = avid || 0;
 		this.cid = cid || 0;
@@ -201,6 +241,18 @@ class VideoEntry {
 	get durationText() {
 		return formatDuration(this.durationSec);
 	}
+
+	get dateText() {
+		if (!this.pubdate) {
+			return '';
+		}
+		const date = new Date(this.pubdate * 1000);
+		if (Number.isNaN(date.getTime())) {
+			return '';
+		}
+		const pad = (n) => String(n).padStart(2, '0');
+		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+	}
 }
 
 /** VideoEntry → 可序列化普通对象（传给 webview 用） */
@@ -209,6 +261,8 @@ function serializeEntry(entry) {
 		bvid: entry.bvid,
 		title: entry.title,
 		uploader: entry.uploader,
+		uploaderFace: entry.uploaderFace,
+		dateText: entry.dateText,
 		cover: entry.cover,
 		durationText: entry.durationText,
 		playCountText: formatCount(entry.playCount),
@@ -216,6 +270,37 @@ function serializeEntry(entry) {
 		summary: entry.summary,
 		pageUrl: entry.pageUrl,
 	};
+}
+
+/** 推荐流可播过滤：仅保留 AV 视频（排除图文/直播等卡片，避免"未知UP主"且不可播的条目） */
+function isPlayableFeedItem(item) {
+	return Boolean(item) && (item.goto ? item.goto === 'av' : true) && Boolean(item.bvid);
+}
+
+/** 直播房间 → 可序列化条目（isLive 标记，roomId 供原位播放拉流） */
+function serializeLiveRoom(room) {
+	const roomUrl = `https://live.bilibili.com/${room.roomId}`;
+	return {
+		bvid: '',
+		roomId: room.roomId,
+		title: room.title,
+		uploader: room.uname,
+		uploaderFace: ensureHttps(room.face),
+		dateText: '',
+		cover: ensureHttps(room.cover),
+		durationText: '',
+		playCountText: formatCount(room.online),
+		danmakuCountText: '',
+		summary: '',
+		pageUrl: roomUrl,
+		isLive: true,
+		roomUrl,
+	};
+}
+
+/** 搜索结果可播过滤：仅保留带 BV 号和 UP 主的视频类型（排除失效/特殊卡片） */
+function isPlayableSearchItem(item) {
+	return Boolean(item) && item.type === 'video' && Boolean(item.bvid) && Boolean(item.author);
 }
 
 /** 归一化推荐流（story / rcmd 两种返回结构） */
@@ -229,6 +314,7 @@ function videoEntryFromFeedItem(item) {
 		uploaderFace: item.owner && item.owner.face,
 		cover: item.cover || item.pic,
 		durationSec: item.duration,
+		pubdate: item.pubdate,
 		summary: item.desc,
 		playCount: item.stat && item.stat.view,
 		danmakuCount: item.stat && item.stat.danmaku,
@@ -246,6 +332,7 @@ function videoEntryFromSearchItem(item) {
 		uploaderFace: item.upic,
 		cover: item.pic,
 		durationSec: parseDurationToSeconds(item.duration),
+		pubdate: item.pubdate,
 		summary: item.description,
 		playCount: parseInt(item.play, 10) || 0,
 		danmakuCount: parseInt(item.video_review, 10) || 0,
@@ -274,8 +361,8 @@ class VideoFeedClient {
 		return headers;
 	}
 
-	/** 带超时的 JSON GET */
-	async fetchJson(url) {
+	/** 带超时的 GET，返回 { body, response }（登录 Cookie 提取需要响应头） */
+	async fetchJsonRaw(url) {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 		try {
@@ -287,10 +374,16 @@ class VideoFeedClient {
 				throw Object.assign(new Error(`HTTP ${response.status}`), { apiCode: -1 });
 			}
 			const body = await response.json();
-			return body;
+			return { body, response };
 		} finally {
 			clearTimeout(timer);
 		}
+	}
+
+	/** 带超时的 JSON GET */
+	async fetchJson(url) {
+		const { body } = await this.fetchJsonRaw(url);
+		return body;
 	}
 
 	/**
@@ -306,7 +399,7 @@ class VideoFeedClient {
 			try {
 				const body = await this.fetchJson(ENDPOINT_RECOMMEND_RCMD);
 				if (body.code === 0 && Array.isArray(body.data && body.data.item) && body.data.item.length > 0) {
-					return { entries: body.data.item.map(videoEntryFromFeedItem).slice(0, FEED_DISPLAY_LIMIT), degradedByCookie };
+					return { entries: body.data.item.filter(isPlayableFeedItem).map(videoEntryFromFeedItem).slice(0, FEED_DISPLAY_LIMIT), degradedByCookie };
 				}
 				if (isCookieExpiredCode(body.code)) {
 					degradedByCookie = true;
@@ -322,7 +415,7 @@ class VideoFeedClient {
 		try {
 			const body = await this.fetchJson(ENDPOINT_STORY_FEED);
 			if (body.code === 0 && Array.isArray(body.data && body.data.items) && body.data.items.length > 0) {
-				return { entries: body.data.items.map(videoEntryFromFeedItem).slice(0, FEED_DISPLAY_LIMIT), degradedByCookie };
+				return { entries: body.data.items.filter(isPlayableFeedItem).map(videoEntryFromFeedItem).slice(0, FEED_DISPLAY_LIMIT), degradedByCookie };
 			}
 			errors.push(Object.assign(new Error(body.message || '推荐接口返回为空'), { apiCode: body.code }));
 		} catch (error) {
@@ -340,9 +433,135 @@ class VideoFeedClient {
 		if (body.code !== 0) {
 			throw Object.assign(new Error(body.message || '搜索失败'), { apiCode: body.code });
 		}
-		const results = (body.data && body.data.result) || [];
+		const results = ((body.data && body.data.result) || []).filter(isPlayableSearchItem);
 		const numResults = (body.data && body.data.numResults) || 0;
 		return { entries: results.map(videoEntryFromSearchItem), numResults };
+	}
+
+	/** 登录用户信息（头像/昵称）：未登录或请求失败返回 null */
+	async fetchUserInfo() {
+		try {
+			const body = await this.fetchJson(ENDPOINT_NAV);
+			if (body.code === 0 && body.data && body.data.isLogin) {
+				return { face: ensureHttps(body.data.face), uname: body.data.uname || '' };
+			}
+		} catch (error) {
+			// 未配置 Cookie 或请求失败时按未登录处理
+		}
+		return null;
+	}
+
+	// ----- 分区数据（热门 / 直播 / 动态 / 待看） -----
+
+	/** 热门视频（每页 20 条，pn 翻页） */
+	async fetchPopularVideos(page = 1) {
+		const url = `${ENDPOINT_POPULAR}?ps=20&pn=${encodeURIComponent(page)}`;
+		const body = await this.fetchJson(url);
+		if (body.code !== 0 || !body.data || !Array.isArray(body.data.list)) {
+			throw Object.assign(new Error(body.message || '获取热门视频失败'), { apiCode: body.code });
+		}
+		return body.data.list
+			.filter((item) => item && item.bvid)
+			.map((item) => new VideoEntry({
+				bvid: item.bvid,
+				avid: item.aid,
+				cid: item.cid || 0,
+				title: item.title,
+				uploader: item.owner && item.owner.name,
+				uploaderFace: item.owner && item.owner.face,
+				// 热门接口的 pic 可能为协议相对形式（//i0.hdslb.com/...）
+				cover: item.pic && item.pic.startsWith('//') ? `https:${item.pic}` : item.pic,
+				durationSec: item.duration,
+				pubdate: item.pubdate,
+				summary: (item.rcmd_reason && item.rcmd_reason.content) || '',
+				playCount: item.stat && item.stat.view,
+				danmakuCount: item.stat && item.stat.danmaku,
+			}));
+	}
+
+	/** 直播推荐房间（返回归一化房间数组，点击在浏览器打开直播间） */
+	async fetchLiveRooms(page = 1) {
+		const url = `${ENDPOINT_LIVE_FEED}?page=${encodeURIComponent(page)}`;
+		const body = await this.fetchJson(url);
+		if (body.code !== 0 || !body.data || !Array.isArray(body.data.list)) {
+			throw Object.assign(new Error(body.message || '获取直播列表失败'), { apiCode: body.code });
+		}
+		return body.data.list
+			.map((room) => ({
+				roomId: room.room_id || room.roomid || 0,
+				title: room.title || '直播间',
+				uname: room.uname || '',
+				face: room.face || '',
+				cover: room.user_cover || room.cover || room.system_cover || room.keyframe || '',
+				online: room.online || 0,
+			}))
+			.filter((room) => room.roomId);
+	}
+
+	/** 解析直播 HLS 流地址（webview 内用 hls.js 播放） */
+	async resolveLiveStream(roomId) {
+		const url = `${ENDPOINT_LIVE_PLAY_URL}?cid=${encodeURIComponent(roomId)}&qn=0&platform=h5`;
+		const body = await this.fetchJson(url);
+		if (body.code !== 0 || !body.data || !Array.isArray(body.data.durl)) {
+			throw Object.assign(new Error(body.message || '获取直播流失败'), { apiCode: body.code });
+		}
+		const streamUrls = body.data.durl
+			.map((seg) => seg && seg.url)
+			.filter(Boolean)
+			.map(ensureHttps);
+		if (streamUrls.length === 0) {
+			throw new Error('未能取得可用的直播流地址');
+		}
+		return { streamUrls };
+	}
+
+	/** 待看清单（需登录 Cookie；接口一次返回全量，由调用方按页切片） */
+	async fetchWatchLaterVideos() {
+		const body = await this.fetchJson(ENDPOINT_WATCHLATER);
+		if (body.code !== 0 || !body.data || !Array.isArray(body.data.list)) {
+			throw Object.assign(new Error(body.message || '获取待看列表失败'), { apiCode: body.code });
+		}
+		return body.data.list
+			.filter((item) => item && item.bvid)
+			.map((item) => new VideoEntry({
+				bvid: item.bvid,
+				avid: item.aid,
+				cid: item.cid || 0,
+				title: item.title,
+				uploader: item.owner && item.owner.name,
+				uploaderFace: item.owner && item.owner.face,
+				cover: item.pic,
+				durationSec: item.duration,
+				pubdate: item.pubdate,
+				summary: item.desc || '',
+				playCount: item.stat && item.stat.view,
+				danmakuCount: item.stat && item.stat.danmaku,
+			}));
+	}
+
+	// ----- 扫码登录 -----
+
+	/** 生成登录二维码：返回 { url, qrcodeKey, qrImageUrl } */
+	async generateLoginQrcode() {
+		const body = await this.fetchJson(ENDPOINT_QR_GENERATE);
+		if (body.code !== 0 || !body.data || !body.data.qrcode_key) {
+			throw Object.assign(new Error(body.message || '获取登录二维码失败'), { apiCode: body.code });
+		}
+		const qrImageUrl = `${QR_IMAGE_SERVICE}${encodeURIComponent(body.data.url)}&size=220x220`;
+		return { url: body.data.url, qrcodeKey: body.data.qrcode_key, qrImageUrl };
+	}
+
+	/** 轮询二维码状态：返回 { state, cookies }（state 见 QR_STATE_*，成功时附登录 Cookie） */
+	async pollLoginQrcode(qrcodeKey) {
+		const { body, response } = await this.fetchJsonRaw(`${ENDPOINT_QR_POLL}?qrcode_key=${encodeURIComponent(qrcodeKey)}`);
+		if (body.code !== 0 || !body.data) {
+			throw Object.assign(new Error(body.message || '查询扫码状态失败'), { apiCode: body.code });
+		}
+		const state = body.data.code;
+		if (state === QR_STATE_SUCCESS) {
+			return { state, cookies: extractCookiePairs(response) };
+		}
+		return { state, cookies: '' };
 	}
 
 	/** 补齐 cid（搜索结果缺省）：按 bvid 查视频详情 */
@@ -677,13 +896,20 @@ async function inputAndSaveCookie() {
 	);
 }
 
-// ---------- 不伪装模式：侧边栏视频流（卡片列表 + 内嵌直接播放，原创实现） ----------
+// ---------- 不伪装模式：仿B站视频流页面（卡片流 + 底部悬浮播放条） ----------
 class DisguiseFeedView {
 	constructor(sidebarProvider, feedClient, context) {
 		this.sidebarProvider = sidebarProvider;
 		this.feedClient = feedClient;
 		this.context = context;
 		this.view = null;
+		// 全部分区条目缓存：feed:play 时按 bvid 查找（含推荐/热门/动态/待看等各分区数据）
+		this.entryCache = new Map();
+		// 扫码登录轮询状态
+		this.loginPollTimer = null;
+		this.loginQrcodeKey = '';
+		// 分区加载状态：待看全量缓存
+		this.watchLaterEntries = [];
 	}
 
 	resolveWebviewView(webviewView) {
@@ -691,24 +917,53 @@ class DisguiseFeedView {
 		webviewView.webview.options = { enableScripts: true, localResourceRoots: [] };
 		webviewView.webview.html = this.buildHtml();
 		webviewView.webview.onDidReceiveMessage((message) => this.handleMessage(message));
+		this.pushUserInfo();
 		webviewView.onDidDispose(() => {
 			if (this.view === webviewView) {
 				this.view = null;
 			}
+			this.stopLoginPolling();
 		});
 	}
 
-	/** 页面 HTML：读取不伪装模式的视频流页面模板并注入配置 */
+	/** 向页面推送登录用户信息（头像/昵称，用于顶栏右侧展示） */
+	async pushUserInfo() {
+		const user = await this.feedClient.fetchUserInfo();
+		await this.postToView({ command: 'feed:userInfo', user });
+	}
+
+	/** 页面 HTML：读取不伪装模式的视频流页面模板并注入配置与 hls.js（直播播放依赖） */
 	buildHtml() {
 		const template = loadWebviewTemplate(this.context, 'feed.html');
+		let hlsLib = '';
+		try {
+			hlsLib = fs.readFileSync(path.join(this.context.extensionUri.fsPath, 'webview', 'hls.light.min.js'), 'utf8');
+			// 防止库代码中出现闭合 script 标签截断页面（下载时已验证无此内容，此处兜底转义）
+			hlsLib = hlsLib.replace(/<\/script/gi, '<\\/script');
+		} catch (error) {
+			console.error('[bili-hover-viewer] 读取 hls.js 失败（直播将无法播放）:', error);
+		}
+		// 注意替换顺序：先普通配置占位符，最后注入 hls 库代码，避免库内容被占位符误替换
 		return applyTemplate(template, {
 			__AUTO_START__: readConfig('autoStartPlayback', true) ? 'autoplay' : '',
 			__VOLUME__: JSON.stringify(readConfig('initialVolume', 0.5)),
+			__HLS_LIB__: hlsLib,
 		});
 	}
 
 	findEntry(bvid) {
-		return this.sidebarProvider.videoEntries.find((item) => item.bvid && item.bvid === bvid) || null;
+		return this.entryCache.get(bvid) ||
+			this.sidebarProvider.videoEntries.find((item) => item.bvid && item.bvid === bvid) ||
+			null;
+	}
+
+	/** 将条目写入分区缓存 */
+	cacheEntries(entries) {
+		for (const entry of entries) {
+			if (entry && entry.bvid) {
+				this.entryCache.set(entry.bvid, entry);
+			}
+		}
 	}
 
 	/** 向页面推送当前视频条目（页面未创建时跳过） */
@@ -720,6 +975,7 @@ class DisguiseFeedView {
 		if (provider.videoEntries.length === 0 && provider.isLoading) {
 			return; // 首次加载中，保留页面上的加载提示
 		}
+		this.cacheEntries(provider.videoEntries);
 		await this.postToView({
 			command: 'feed:entries',
 			entries: provider.videoEntries.map(serializeEntry),
@@ -758,19 +1014,163 @@ class DisguiseFeedView {
 			case 'feed:nextPage':
 				await this.sidebarProvider.gotoNextPage();
 				break;
+			case 'feed:refresh':
+				await this.sidebarProvider.reloadFeed();
+				break;
 			case 'feed:play':
 				await this.playEntry(message.bvid);
 				break;
+			case 'feed:playLive':
+				await this.playLiveEntry(message.roomId);
+				break;
 			case 'feed:openOnSite': {
-				const entry = this.findEntry(message.bvid);
-				if (entry && entry.pageUrl) {
-					await vscode.env.openExternal(vscode.Uri.parse(entry.pageUrl));
+				// 支持直接传 url（直播房间），否则按 bvid 查缓存条目
+				let url = typeof message.url === 'string' ? message.url : '';
+				if (!url) {
+					const entry = this.findEntry(message.bvid);
+					url = entry && entry.pageUrl;
+				}
+				if (url) {
+					await vscode.env.openExternal(vscode.Uri.parse(url));
 				}
 				break;
 			}
+			case 'feed:loadTab':
+				await this.handleLoadTab(message);
+				break;
+			case 'feed:loginStart':
+				await this.handleLoginStart();
+				break;
+			case 'feed:loginCancel':
+				this.stopLoginPolling();
+				break;
+			case 'feed:logout':
+				await this.handleLogout();
+				break;
 			default:
 				break;
 		}
+	}
+
+	// ----- 分区加载（热门 / 直播 / 动态 / 待看） -----
+
+	/** 处理页面分区加载请求：返回 feed:tabData（append 表示追加到已加载数据之后） */
+	async handleLoadTab(message) {
+		const tab = message.tab;
+		const page = Math.max(1, Number(message.page) || 1);
+		const append = Boolean(message.append);
+		try {
+			let payload = { tab, page, append, entries: [], hasMore: false, offset: '' };
+			if (tab === 'popular') {
+				const entries = await this.feedClient.fetchPopularVideos(page);
+				this.cacheEntries(entries);
+				payload.entries = entries.map(serializeEntry);
+				payload.hasMore = entries.length >= 20;
+			} else if (tab === 'live') {
+				const rooms = await this.feedClient.fetchLiveRooms(page);
+				payload.entries = rooms.map(serializeLiveRoom);
+				payload.hasMore = rooms.length >= 20;
+			} else if (tab === 'watchlater') {
+				if (!this.feedClient.userCookie) {
+					payload.needLogin = true;
+				} else {
+					if (!append || this.watchLaterEntries.length === 0) {
+						this.watchLaterEntries = await this.feedClient.fetchWatchLaterVideos();
+						this.cacheEntries(this.watchLaterEntries);
+					}
+					const start = (page - 1) * WATCHLATER_PAGE_SIZE;
+					payload.entries = this.watchLaterEntries.slice(start, start + WATCHLATER_PAGE_SIZE).map(serializeEntry);
+					payload.hasMore = start + WATCHLATER_PAGE_SIZE < this.watchLaterEntries.length;
+				}
+			} else {
+				payload.error = '未知分区';
+			}
+			await this.postToView({ command: 'feed:tabData', ...payload });
+		} catch (error) {
+			const errMsg = error instanceof Error ? error.message : String(error);
+			const apiCode = error && error.apiCode;
+			console.error(`[bili-hover-viewer] 加载分区 ${tab} 失败:`, error);
+			await this.postToView({
+				command: 'feed:tabData',
+				tab,
+				page,
+				append,
+				entries: [],
+				hasMore: false,
+				offset: '',
+				error: errMsg + (apiCode ? `（code ${apiCode}）` : ''),
+				needLogin: !this.feedClient.userCookie || isCookieExpiredCode(apiCode),
+			});
+		}
+	}
+
+	// ----- 扫码登录 -----
+
+	/** 开始扫码登录：生成二维码并启动轮询 */
+	async handleLoginStart() {
+		this.stopLoginPolling();
+		try {
+			const { qrcodeKey, qrImageUrl } = await this.feedClient.generateLoginQrcode();
+			this.loginQrcodeKey = qrcodeKey;
+			await this.postToView({ command: 'feed:loginQr', qrImageUrl });
+			this.loginPollTimer = setInterval(() => {
+				this.pollLoginStatus();
+			}, LOGIN_POLL_INTERVAL_MS);
+		} catch (error) {
+			const errMsg = error instanceof Error ? error.message : String(error);
+			console.error('[bili-hover-viewer] 获取登录二维码失败:', error);
+			await this.postToView({ command: 'feed:loginError', message: errMsg });
+		}
+	}
+
+	/** 轮询扫码状态：成功保存 Cookie，过期自动刷新二维码 */
+	async pollLoginStatus() {
+		if (!this.loginQrcodeKey) {
+			return;
+		}
+		let result;
+		try {
+			result = await this.feedClient.pollLoginQrcode(this.loginQrcodeKey);
+		} catch (error) {
+			console.error('[bili-hover-viewer] 查询扫码状态失败:', error);
+			return; // 网络抖动时下一轮继续
+		}
+		if (result.state === QR_STATE_SUCCESS) {
+			this.stopLoginPolling();
+			const cookies = result.cookies;
+			if (!cookies) {
+				await this.postToView({ command: 'feed:loginError', message: '登录成功但未取到登录态，请重试' });
+				return;
+			}
+			await updateGlobalConfig('userCookie', cookies);
+			vscode.window.showInformationMessage('B站扫码登录成功，推荐列表将按账号个性化加载');
+			await this.pushUserInfo();
+			await this.postToView({ command: 'feed:loginSuccess' });
+		} else if (result.state === QR_STATE_EXPIRED) {
+			// 二维码过期：自动重新生成
+			await this.handleLoginStart();
+		} else if (result.state === QR_STATE_CONFIRMED) {
+			await this.postToView({ command: 'feed:loginState', state: 'confirmed' });
+		} else if (result.state === QR_STATE_NOT_SCANNED) {
+			await this.postToView({ command: 'feed:loginState', state: 'waiting' });
+		}
+	}
+
+	/** 停止轮询并清理登录状态 */
+	stopLoginPolling() {
+		if (this.loginPollTimer) {
+			clearInterval(this.loginPollTimer);
+			this.loginPollTimer = null;
+		}
+		this.loginQrcodeKey = '';
+	}
+
+	/** 退出登录：清空 Cookie 配置（配置监听会自动刷新推荐列表） */
+	async handleLogout() {
+		this.stopLoginPolling();
+		await updateGlobalConfig('userCookie', '');
+		await this.pushUserInfo();
+		vscode.window.showInformationMessage('已退出登录，将使用随机推荐');
 	}
 
 	/** 解析播放流并推送给页面 */
@@ -794,13 +1194,39 @@ class DisguiseFeedView {
 			vscode.window.showErrorMessage(`B站视频加载失败：${errMsg}${apiCode ? `（code ${apiCode}）` : ''}`);
 			await this.postToView({
 				command: 'feed:playerError',
+				bvid: requestBvid,
 				message: errMsg + (apiCode ? ` [code ${apiCode}]` : ''),
 				cookieExpired: isCookieExpiredCode(apiCode),
 			});
 		}
 	}
 
-	/** 不伪装模式随机播放：通知视频流页面在对应卡片内原位播放 */
+	/** 解析直播 HLS 流并推送给页面（原位播放，webview 内用 hls.js 挂载） */
+	async playLiveEntry(requestRoomId) {
+		if (!requestRoomId) {
+			return;
+		}
+		try {
+			const { streamUrls } = await this.feedClient.resolveLiveStream(requestRoomId);
+			await this.postToView({
+				command: 'feed:liveStreamReady',
+				roomId: requestRoomId,
+				streamUrls,
+			});
+		} catch (error) {
+			const errMsg = error instanceof Error ? error.message : String(error);
+			const apiCode = error && error.apiCode;
+			console.error('[bili-hover-viewer] 解析直播流失败:', { message: errMsg, apiCode });
+			vscode.window.showErrorMessage(`直播加载失败：${errMsg}${apiCode ? `（code ${apiCode}）` : ''}`);
+			await this.postToView({
+				command: 'feed:liveStreamError',
+				roomId: requestRoomId,
+				message: errMsg + (apiCode ? ` [code ${apiCode}]` : ''),
+			});
+		}
+	}
+
+	/** 不伪装模式随机播放：通知视频流页面在底部播放条中播放 */
 	async playRandomInWebview(bvid) {
 		await this.postToView({ command: 'feed:playRequest', bvid });
 	}
@@ -983,7 +1409,7 @@ function activate(context) {
 			vscode.window.showInformationMessage(
 				next
 					? '已开启伪装：侧边栏为视频列表，播放面板伪装为本地代码文件（聚焦显示画面、失焦隐藏）'
-					: '已关闭伪装：侧边栏为视频流卡片列表，点击后视频在卡片位置原位播放'
+					: '已关闭伪装：侧边栏为仿B站视频流页面，点击卡片在底部悬浮播放条中播放'
 			);
 		}),
 
