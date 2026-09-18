@@ -298,6 +298,7 @@
   const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8c0-.9 1-1.5 1.8-1L20 11.1c.7.4.7 1.4 0 1.8L8.8 20.2c-.8.5-1.8-.1-1.8-1V4.8z"/></svg>';
   const ICON_BUBBLE = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.6 4h16.8a1.6 1.6 0 0 1 1.6 1.6v10.8a1.6 1.6 0 0 1-1.6 1.6h-9.9l-4.9 3.9a.9.9 0 0 1-1.4-.7V18h-.6a1.6 1.6 0 0 1-1.6-1.6V5.6A1.6 1.6 0 0 1 3.6 4z"/></svg>';
   const ICON_EXTERNAL = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42L17.59 5H14V3zM5 5h6v2H7v10h10v-4h2v6H5V5z"/></svg>';
+  const ICON_CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg>';
   const ICON_PLAY_CIRCLE = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#00a1d6"/><path d="M10 8.2v7.6c0 .6.7 1 1.2.7l6-3.8c.5-.3.5-1 0-1.3l-6-3.8c-.5-.4-1.2 0-1.2.6z" fill="#fff"/></svg>';
   const ICON_SPIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3a9 9 0 1 1-9 9"/></svg>';
 
@@ -305,6 +306,8 @@
   let entries = [];
   let meta = { searchMode: false, page: 1, totalPages: 1, canPrev: false, canNext: false };
   let activeTab = 'recommend';
+  let pendingPlay = ''; // 随机播放时列表未就绪，待 feed:entries 到达后补播
+  let lastPageKey = ''; // 搜索翻页时避免重复滚动复位
   let toastTimer = null;
   // 分区状态：已加载数据与翻页游标（热门/直播 pn 翻页，待看前端切片）
   const tabState = {};
@@ -375,6 +378,17 @@
     cover.appendChild(playIcon);
 
     const actions = el('div', 'video-hover-actions');
+    // 稍后再看（同 TouchFish 时钟按钮；仅普通视频，直播无 bvid 不提供）
+    if (!isLive && entry.bvid) {
+      const laterBtn = el('div', 'video-action-btn');
+      laterBtn.title = '稍后再看';
+      laterBtn.appendChild(makeIcon(ICON_CLOCK));
+      laterBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({ command: 'feed:addViewLater', bvid: entry.bvid });
+      });
+      actions.appendChild(laterBtn);
+    }
     const openBtn = el('div', 'video-action-btn');
     openBtn.title = '在B站打开';
     openBtn.appendChild(makeIcon(ICON_EXTERNAL));
@@ -843,6 +857,9 @@
         break;
       case 'feed:liveStreamError':
         handleLiveStreamError(msg);
+        break;
+      case 'feed:viewLaterResult':
+        toast(msg.ok ? (msg.message || '已加入稍后再看') : '加入稍后再看失败：' + (msg.message || '未知错误'));
         break;
       case 'feed:playRequest': {
         const bvid = msg.bvid;
