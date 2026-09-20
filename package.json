@@ -2,7 +2,7 @@
 	"name": "fish-hover",
 	"displayName": "悬停视频",
 	"description": "侧边栏浏览B站推荐视频（支持 Cookie 个性化与搜索）与抖音推荐/关注/搜索。常规展示：侧边栏视频流卡片列表，点击后视频在卡片位置原位播放；悬停展示：点击视频在编辑区打开播放面板，面板呈现为本地代码文件外观，画面被遮罩盖住、鼠标悬停显示/移开恢复（B站与抖音均支持）。",
-	"version": "0.4.2",
+	"version": "0.4.3",
 	"publisher": "moyu-yao",
 	"license": "MIT",
 	"repository": {
