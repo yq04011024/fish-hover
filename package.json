@@ -1,8 +1,8 @@
 {
 	"name": "fish-hover",
-	"displayName": "B站悬停刷视频",
-	"description": "侧边栏浏览B站推荐视频（支持 Cookie 个性化与搜索）与抖音推荐/关注/搜索。不伪装模式：侧边栏视频流卡片列表，点击后视频在卡片位置原位播放；伪装模式：点击视频在编辑区打开播放面板，面板伪装为本地代码文件，画面被遮罩、聚焦显示/失焦隐藏（B站与抖音均支持）。",
-	"version": "0.4.1",
+	"displayName": "悬停视频",
+	"description": "侧边栏浏览B站推荐视频（支持 Cookie 个性化与搜索）与抖音推荐/关注/搜索。常规展示：侧边栏视频流卡片列表，点击后视频在卡片位置原位播放；悬停展示：点击视频在编辑区打开播放面板，面板呈现为本地代码文件外观，画面被遮罩盖住、鼠标悬停显示/移开恢复（B站与抖音均支持）。",
+	"version": "0.4.2",
 	"publisher": "moyu-yao",
 	"license": "MIT",
 	"repository": {
@@ -59,8 +59,14 @@
 				"category": "聚焦视界"
 			},
 			{
-				"command": "biliHover.toggleDisguise",
-				"title": "切换是否伪装",
+				"command": "biliHover.enterHoverMode",
+				"title": "悬停展示",
+				"icon": "$(eye)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.enterNormalMode",
+				"title": "常规展示",
 				"icon": "$(eye-closed)",
 				"category": "聚焦视界"
 			},
@@ -152,19 +158,19 @@
 				"biliHover.playerPaneTitle": {
 					"type": "string",
 					"default": "jsProject00111.js",
-					"description": "伪装模式下播放面板的标题文字（让面板看起来像一个本地代码文件）",
+					"description": "悬停展示模式下播放面板的标题文字（让面板看起来像一个本地代码文件）",
 					"order": 5
 				},
 				"biliHover.disguiseFilePath": {
 					"type": "string",
 					"default": "",
-					"markdownDescription": "伪装模式下播放面板遮罩显示的本地文件**绝对路径**（支持 java/vue/js/html/xml/txt 等文本文件），遮罩将展示该文件内容（带行号、编辑器风格），聚焦/悬停时淡出显示视频；留空则遮罩为纯黑。",
+					"markdownDescription": "悬停展示模式下播放面板遮罩显示的本地文件**绝对路径**（支持 java/vue/js/html/xml/txt 等文本文件），遮罩将展示该文件内容（带行号、编辑器风格），鼠标悬停时淡出显示视频；留空则遮罩为纯黑。",
 					"order": 6
 				},
 				"biliHover.disguiseEnabled": {
 					"type": "boolean",
 					"default": false,
-					"markdownDescription": "是否伪装。**关闭**：侧边栏为视频流卡片列表，点击后视频在该卡片位置原位播放；**开启**：侧边栏为视频列表，点击后在编辑区打开播放面板——面板伪装为本地代码文件，画面被遮罩、聚焦显示/失焦隐藏",
+					"markdownDescription": "展示模式开关。**关闭（常规展示，默认）**：侧边栏为视频流卡片列表，点击后视频在该卡片位置原位播放；**开启（悬停展示）**：侧边栏为视频列表，点击后在编辑区打开播放面板——面板呈现为本地代码文件外观，画面被遮罩盖住、鼠标悬停显示/移开恢复",
 					"order": 7
 				},
 				"biliHover.sidebarViewTitle": {
@@ -218,13 +224,23 @@
 					"group": "navigation@1"
 				},
 				{
-					"command": "biliHover.toggleDisguise",
-					"when": "view == biliHoverVideoList",
+					"command": "biliHover.enterHoverMode",
+					"when": "view == biliHoverVideoList && !config.biliHover.disguiseEnabled",
 					"group": "navigation@2"
 				},
 				{
-					"command": "biliHover.toggleDisguise",
-					"when": "view == biliHoverFeedView",
+					"command": "biliHover.enterNormalMode",
+					"when": "view == biliHoverVideoList && config.biliHover.disguiseEnabled",
+					"group": "navigation@2"
+				},
+				{
+					"command": "biliHover.enterHoverMode",
+					"when": "view == biliHoverFeedView && !config.biliHover.disguiseEnabled",
+					"group": "navigation@2"
+				},
+				{
+					"command": "biliHover.enterNormalMode",
+					"when": "view == biliHoverFeedView && config.biliHover.disguiseEnabled",
 					"group": "navigation@2"
 				},
 				{
@@ -258,8 +274,13 @@
 					"group": "navigation@1"
 				},
 				{
-					"command": "biliHover.toggleDisguise",
-					"when": "view == biliHoverDouyinView",
+					"command": "biliHover.enterHoverMode",
+					"when": "view == biliHoverDouyinView && !config.biliHover.disguiseEnabled",
+					"group": "navigation@2"
+				},
+				{
+					"command": "biliHover.enterNormalMode",
+					"when": "view == biliHoverDouyinView && config.biliHover.disguiseEnabled",
 					"group": "navigation@2"
 				},
 				{
@@ -278,8 +299,13 @@
 					"group": "navigation@2"
 				},
 				{
-					"command": "biliHover.toggleDisguise",
-					"when": "view == biliHoverDouyinList",
+					"command": "biliHover.enterHoverMode",
+					"when": "view == biliHoverDouyinList && !config.biliHover.disguiseEnabled",
+					"group": "navigation@3"
+				},
+				{
+					"command": "biliHover.enterNormalMode",
+					"when": "view == biliHoverDouyinList && config.biliHover.disguiseEnabled",
 					"group": "navigation@3"
 				}
 			]

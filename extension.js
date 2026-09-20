@@ -3228,6 +3228,19 @@ function activate(context) {
 	context.subscriptions.push({ dispose: () => douyinProxy.stop() });
 	context.subscriptions.push({ dispose: () => dyWorker.stop() });
 
+	// 展示模式切换：常规展示（disguiseEnabled=false）/ 悬停展示（disguiseEnabled=true）
+	// 标题栏按钮图标随当前状态动态切换：常规=无斜线 eye，悬停=带斜线 eye-closed（when 子句按 config 互斥显隐）
+	const setDisplayMode = async (hoverMode) => {
+		if (readConfig('disguiseEnabled', true) === hoverMode) { return; }
+		await updateGlobalConfig('disguiseEnabled', hoverMode);
+		// B站与抖音侧边栏视图显隐均由 when 子句自动切换，已打开面板由配置监听重渲染
+		vscode.window.showInformationMessage(
+			hoverMode
+				? '已切换为悬停展示模式：B站/抖音侧边栏为视频列表，点击后在编辑区打开播放面板（鼠标悬停显示画面、移开恢复代码内容）'
+				: '已切换为常规展示模式：侧边栏为视频流页面，点击视频原位播放'
+		);
+	};
+
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider('biliHoverVideoList', sidebarProvider),
 		vscode.window.registerTreeDataProvider('biliHoverDouyinList', douyinListProvider),
@@ -3277,16 +3290,11 @@ function activate(context) {
 		vscode.commands.registerCommand('biliHover.douyinSearchRetry', () => douyinListProvider.retrySearch()),
 		vscode.commands.registerCommand('biliHover.douyinSearchMore', () => douyinListProvider.loadMoreSearch()),
 
-		// 切换伪装开关：B站与抖音侧边栏视图显隐均由 when 子句自动切换，已打开面板由配置监听重渲染
-		vscode.commands.registerCommand('biliHover.toggleDisguise', async () => {
-			const next = !readConfig('disguiseEnabled', true);
-			await updateGlobalConfig('disguiseEnabled', next);
-			vscode.window.showInformationMessage(
-				next
-					? '已开启伪装：B站/抖音侧边栏均为视频列表，点击后在编辑区打开伪装面板（聚焦显示画面、失焦隐藏）'
-					: '已关闭伪装：侧边栏为视频流页面，点击视频原位播放'
-			);
-		}),
+		// 常规展示 / 悬停展示切换命令（标题栏按 config 状态互斥显示，图标随之动态变化）
+		vscode.commands.registerCommand('biliHover.enterHoverMode', () => setDisplayMode(true)),
+		vscode.commands.registerCommand('biliHover.enterNormalMode', () => setDisplayMode(false)),
+		// 兼容旧命令 id（历史版本快捷键/外部调用）：在两种模式间来回切换
+		vscode.commands.registerCommand('biliHover.toggleDisguise', () => setDisplayMode(!readConfig('disguiseEnabled', true))),
 
 		vscode.commands.registerCommand('biliHover.customizeSidebarTitle', async () => {
 			const current = readConfig('sidebarViewTitle', DEFAULT_SIDEBAR_TITLE);
