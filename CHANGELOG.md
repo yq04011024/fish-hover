@@ -2,6 +2,26 @@
 
 本插件所有 notable 变更记录在此文件中。
 
+## [0.3.0] - 2026-09-18
+
+### 新增
+- **独立「抖音视界」**（活动栏新入口，与 B 站视图互不影响）：
+  - 竖向沉浸式信息流：scroll-snap 逐屏吸附，滚轮 / ↑↓ 键 / 命令切换，当前视频自动播放、其余暂停
+  - 分区：推荐 / 关注（关注流接口要求 a_bogus 签名，内置自研纯算法签名 `dy-signer.js`，与参考实现逐字节一致）
+  - 本地媒体代理：`127.0.0.1` 随机端口 HTTP 代理转发视频流，附带 Cookie/UA/Referer、手动跟随重定向、透传 Range（支持进度条拖动），解决 webview 直连抖音 CDN 403
+  - 抖音 Cookie 配置：标题栏 Cookie 按钮 / `biliHover.douyinSetCookie` 命令 / `biliHover.douyinCookie` 配置项；未配置时页面引导；配置变更自动重载
+  - 内存保护：仅保留当前 ±1 视频的 src，其余回收；列表上限 60 条
+  - 播放失败自动换下一个直链（最多 3 次）；仅 HLS 流的视频提供「在浏览器打开」兜底
+- 新增配置：`biliHover.douyinCookie` / `biliHover.douyinAutoPlay` / `biliHover.douyinVolume`
+- 新增命令：`biliHover.douyinRefresh`（刷新）/ `biliHover.douyinSetCookie`（设置抖音Cookie）/ `biliHover.douyinPrevVideo` / `biliHover.douyinNextVideo`
+
+### 修复
+- 配置 Cookie 后无法加载（对照 TouchFish 可用实现排查）：请求层由 undici `fetch` 改为 node http/https 模块（TLS/头指纹差异被抖音风控拦截）；推荐流补齐 a_bogus 签名与 `Referer: /?recommend=1`、`platform=PC`、`timestamp` 参数；关注流对齐精简参数集与 Chrome/129 UA（签名与请求头一致）、`Referer: /follow`；修正关注流响应解析（`data[].aweme` + 顶层 `cursor/has_more`，此前必然解析为空列表）；Cookie 值清洗换行等非法头字符
+
+### 说明
+- 抖音推荐流与关注流均需登录态 Cookie（实测无 Cookie 返回空数据），不提供游客流
+- 一期不包含：直播、点赞/评论交互、HLS 内播（回退浏览器打开）、下载
+
 ## [0.2.3] - 2026-09-18
 
 ### 新增

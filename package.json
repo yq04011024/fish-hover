@@ -2,7 +2,7 @@
 	"name": "fish-hover",
 	"displayName": "B站悬停刷视频",
 	"description": "侧边栏浏览B站推荐视频（支持 Cookie 个性化与搜索）。不伪装模式：侧边栏视频流卡片列表，点击后视频在卡片位置原位播放；伪装模式：点击视频在编辑区打开播放面板，面板伪装为本地代码文件，画面被遮罩、聚焦显示/失焦隐藏。",
-	"version": "0.2.3",
+	"version": "0.3.0",
 	"publisher": "moyu-yao",
 	"license": "MIT",
 	"repository": {
@@ -68,6 +68,28 @@
 				"command": "biliHover.playSelectedVideo",
 				"title": "播放该视频",
 				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.douyinRefresh",
+				"title": "刷新抖音推荐",
+				"icon": "$(refresh)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.douyinSetCookie",
+				"title": "设置抖音Cookie",
+				"icon": "$(gear)",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.douyinPrevVideo",
+				"title": "抖音：上一个视频",
+				"category": "聚焦视界"
+			},
+			{
+				"command": "biliHover.douyinNextVideo",
+				"title": "抖音：下一个视频",
+				"category": "聚焦视界"
 			}
 		],
 		"configuration": {
@@ -124,6 +146,26 @@
 					"default": "聚焦视界",
 					"description": "侧边栏视图标题（修改后需重启编辑器生效）",
 					"order": 8
+				},
+				"biliHover.douyinCookie": {
+					"type": "string",
+					"default": "",
+					"markdownDescription": "抖音账号 Cookie（从浏览器开发者工具复制完整 Cookie 值，推荐流与关注流均需登录态）。配置后进入「抖音视界」加载个性化内容。",
+					"order": 9
+				},
+				"biliHover.douyinAutoPlay": {
+					"type": "boolean",
+					"default": true,
+					"description": "抖音视频滑动到可视区后自动播放",
+					"order": 10
+				},
+				"biliHover.douyinVolume": {
+					"type": "number",
+					"default": 0.5,
+					"minimum": 0,
+					"maximum": 1,
+					"description": "抖音播放器初始音量（0-1）",
+					"order": 11
 				}
 			}
 		},
@@ -178,6 +220,16 @@
 					"command": "biliHover.refreshVideoList",
 					"when": "view == biliHoverFeedView",
 					"group": "navigation@4"
+				},
+				{
+					"command": "biliHover.douyinSetCookie",
+					"when": "view == biliHoverDouyinView",
+					"group": "navigation@0"
+				},
+				{
+					"command": "biliHover.douyinRefresh",
+					"when": "view == biliHoverDouyinView",
+					"group": "navigation@1"
 				}
 			]
 		},
@@ -194,6 +246,13 @@
 					"type": "webview",
 					"when": "!config.biliHover.disguiseEnabled"
 				}
+			],
+			"douyinView": [
+				{
+					"id": "biliHoverDouyinView",
+					"name": "抖音视界",
+					"type": "webview"
+				}
 			]
 		},
 		"viewsContainers": {
@@ -202,6 +261,11 @@
 					"id": "biliHoverView",
 					"title": "聚焦视界",
 					"icon": "resources/viewer-icon.svg"
+				},
+				{
+					"id": "douyinView",
+					"title": "抖音视界",
+					"icon": "resources/douyin-icon.svg"
 				}
 			]
 		}

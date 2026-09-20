@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src https: data: http://127.0.0.1:* http://localhost:*; media-src http://127.0.0.1:* http://localhost:*; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<meta name="referrer" content="no-referrer">
+<title>抖音视界</title>
+<style>
+  * { font-family: "Microsoft YaHei", var(--vscode-font-family); box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100vh; overflow: hidden; background: #000; color: #fff; }
+  *:focus { outline: none; }
+  ::-webkit-scrollbar { width: 0; height: 0; }
+
+  /* ---------- 顶栏：分区标签 + 搜索框 + Cookie 按钮 ---------- */
+  .dy-header { position: fixed; top: 0; left: 0; right: 0; height: 46px; z-index: 200;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 12px;
+    background: linear-gradient(to bottom, rgba(0,0,0,.65), rgba(0,0,0,0)); pointer-events: none; }
+  .dy-header > * { pointer-events: auto; }
+  .dy-logo { font-size: 15px; font-weight: 700; letter-spacing: 1px; color: #fff; user-select: none;
+    text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+  .dy-tabs { display: flex; gap: 22px; }
+  .dy-tab { position: relative; padding: 6px 2px; font-size: 14px; color: rgba(255,255,255,.65);
+    cursor: pointer; user-select: none; -webkit-user-select: none; transition: color .2s ease;
+    text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+  .dy-tab.active { color: #fff; font-weight: 700; font-size: 15px; }
+  .dy-tab.active::after { content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: 0; width: 20px; height: 3px; border-radius: 2px; background: #fe2c55; }
+  .dy-cookie-btn { background: transparent; border: none; color: rgba(255,255,255,.85); font-size: 12px;
+    cursor: pointer; padding: 5px 8px; border-radius: 6px; transition: background .2s ease, color .2s ease; flex: none; }
+  .dy-cookie-btn:hover { background: rgba(255,255,255,.15); color: #fff; }
+
+  /* ---------- 顶栏搜索框 ---------- */
+  .dy-search { flex: 1; min-width: 0; max-width: 170px; display: flex; align-items: center; gap: 6px;
+    margin: 0 10px; background: rgba(255,255,255,.14); border-radius: 15px; padding: 4px 11px;
+    transition: background .2s ease; }
+  .dy-search:focus-within { background: rgba(255,255,255,.22); }
+  .dy-search svg { width: 13px; height: 13px; fill: rgba(255,255,255,.65); flex: none; }
+  .dy-search input { flex: 1; min-width: 0; width: 100%; background: transparent; border: none; outline: none;
+    color: #fff; font-size: 12px; padding: 0; }
+  .dy-search input::placeholder { color: rgba(255,255,255,.5); }
+  .dy-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none;
+    width: 12px; height: 12px; cursor: pointer;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ccc'%3E%3Cpath d='M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z'/%3E%3C/svg%3E") center/contain no-repeat; }
+
+  /* ---------- 竖滑流容器（scroll-snap 逐屏吸附） ---------- */
+  .dy-feed { height: 100vh; overflow-y: auto; scroll-snap-type: y mandatory; scroll-behavior: auto; }
+  .dy-card { position: relative; height: 100vh; scroll-snap-align: start; scroll-snap-stop: always;
+    background: #000; overflow: hidden; }
+  .dy-card video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+    background: #000; }
+  /* 底部渐变信息遮罩 */
+  .dy-grad { position: absolute; left: 0; right: 0; bottom: 0; height: 38%; pointer-events: none;
+    background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); }
+  /* 底部信息区 */
+  .dy-info { position: absolute; left: 0; right: 64px; bottom: 0; padding: 14px 14px 18px; z-index: 5; }
+  .dy-author { font-size: 14px; font-weight: 700; margin-bottom: 6px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  .dy-title { font-size: 13px; line-height: 1.5; color: rgba(255,255,255,.92); max-height: 58px;
+    overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .dy-stats { margin-top: 8px; font-size: 12px; color: rgba(255,255,255,.6); }
+  /* 右侧悬浮操作栏 */
+  .dy-side { position: absolute; right: 10px; bottom: 20px; z-index: 6; display: flex; flex-direction: column;
+    align-items: center; gap: 14px; }
+  .dy-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 2px solid #fff;
+    background: #222; }
+  .dy-side-btn { background: transparent; border: none; color: rgba(255,255,255,.85); font-size: 11px;
+    cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 4px; border-radius: 8px; transition: color .2s ease; }
+  .dy-side-btn:hover { color: #fff; }
+  .dy-side-btn svg { width: 20px; height: 20px; fill: currentColor; filter: drop-shadow(0 1px 3px rgba(0,0,0,.7)); }
+
+  /* ---------- 引导 / 空态卡片 ---------- */
+  .dy-empty { height: 100vh; scroll-snap-align: start; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; padding: 0 28px; text-align: center; }
+  .dy-empty-icon { width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,.08);
+    display: flex; align-items: center; justify-content: center; }
+  .dy-empty-icon svg { width: 26px; height: 26px; fill: rgba(255,255,255,.5); }
+  .dy-empty-title { font-size: 15px; font-weight: 700; }
+  .dy-empty-desc { font-size: 12px; color: rgba(255,255,255,.55); line-height: 1.8; }
+  .dy-empty-desc code { font-family: Consolas, monospace; background: rgba(255,255,255,.1);
+    padding: 1px 5px; border-radius: 4px; }
+  .dy-empty-btn { margin-top: 4px; background: #fe2c55; border: none; color: #fff; font-size: 13px;
+    padding: 8px 22px; border-radius: 6px; cursor: pointer; transition: background .2s ease; }
+  .dy-empty-btn:hover { background: #ff506f; }
+  .dy-empty-btn.ghost { background: transparent; border: 1px solid rgba(255,255,255,.3); }
+  .dy-empty-btn.ghost:hover { border-color: #fff; background: rgba(255,255,255,.08); }
+
+  /* ---------- 加载指示 ---------- */
+  .dy-loading { position: absolute; left: 50%; bottom: 12vh; transform: translateX(-50%); z-index: 20;
+    display: none; align-items: center; gap: 8px; font-size: 12px; color: rgba(255,255,255,.65);
+    background: rgba(0,0,0,.55); padding: 7px 14px; border-radius: 16px; }
+  .dy-loading.show { display: flex; }
+  .dy-spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.25);
+    border-top-color: #fff; border-radius: 50%; animation: dy-spin .8s linear infinite; }
+  @keyframes dy-spin { to { transform: rotate(360deg); } }
+
+  /* ---------- toast ---------- */
+  .dy-toast { position: fixed; left: 50%; bottom: 8vh; transform: translateX(-50%); z-index: 500;
+    background: rgba(30,30,30,.92); color: #fff; font-size: 13px; padding: 9px 18px; border-radius: 8px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.5); opacity: 0; transition: opacity .25s ease; pointer-events: none;
+    max-width: calc(100% - 40px); text-align: center; }
+  .dy-toast.show { opacity: 1; }
+
+  .dy-error-tip { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px;
+    align-items: center; justify-content: center; background: #111; z-index: 8; font-size: 13px;
+    color: rgba(255,255,255,.75); padding: 0 24px; text-align: center; }
+</style>
+</head>
+<body>
+  <!-- 顶栏 -->
+  <div class="dy-header">
+    <div class="dy-tabs">
+      <div class="dy-tab active" data-tab="feed">推荐</div>
+      <div class="dy-tab" data-tab="following">关注</div>
+    </div>
+    <form class="dy-search" id="searchForm">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 4.9L20.4 19l-4.9-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
+      <input id="searchInput" type="search" placeholder="搜索抖音" autocomplete="off" />
+    </form>
+    <button class="dy-cookie-btn" id="cookieBtn" title="设置抖音 Cookie（推荐/关注/搜索均需登录态）">Cookie</button>
+  </div>
+
+  <!-- 竖滑流 -->
+  <div class="dy-feed" id="feed"></div>
+
+  <!-- 加载指示 -->
+  <div class="dy-loading" id="loading"><div class="dy-spinner"></div><span id="loadingText">加载中…</span></div>
+  <!-- toast -->
+  <div class="dy-toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  const vscode = acquireVsCodeApi();
+  // 注入配置：__AUTO_PLAY__（'1'/'0'）与 __VOLUME__（JSON 数字）由宿主 applyTemplate 替换
+  const AUTO_PLAY = '__AUTO_PLAY__' === '1';
+  const INITIAL_VOLUME = __VOLUME__;
+
+  // ---------- 状态 ----------
+  const state = {
+    tab: 'feed', // 当前分区：feed（推荐）/ following（关注）/ search（搜索结果）
+    entries: { feed: [], following: [], search: [] },
+    activeIndex: { feed: 0, following: 0, search: 0 },
+    loading: { feed: false, following: false, search: false },
+    needCookie: { feed: false, following: false, search: false }, // 列表为空且需登录态时展示引导卡片
+    hasMoreFollowing: true,
+    hasMoreSearch: false,
+    searchKeyword: '', // 当前搜索关键词
+    searchVerify: false, // 搜索被风控要求人机验证（verify_check）
+    mutedFallback: false, // 自动播放被拒绝时降级为静音播放
+    toastTimer: null,
+  };
+  const videos = new Map(); // awemeId → HTMLVideoElement（与卡片一一对应）
+  const feedEl = document.getElementById('feed');
+  const loadingEl = document.getElementById('loading');
+  const loadingTextEl = document.getElementById('loadingText');
+  const toastEl = document.getElementById('toast');
+
+  // ---------- 工具 ----------
+  function showToast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(state.toastTimer);
+    state.toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+  }
+
+  function setLoading(show, text) {
+    loadingTextEl.textContent = text || '加载中…';
+    loadingEl.classList.toggle('show', Boolean(show));
+  }
+
+  /** 转义 HTML 文本（标题/作者来自接口，防注入） */
+  function escapeHtml(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // ---------- 卡片渲染 ----------
+  function buildCard(entry) {
+    const card = document.createElement('div');
+    card.className = 'dy-card';
+    card.dataset.awemeId = entry.awemeId;
+
+    const video = document.createElement('video');
+    video.setAttribute('playsinline', '');
+    video.preload = 'auto';
+    video.volume = INITIAL_VOLUME;
+    if (entry.cover) {
+      video.poster = entry.cover;
+    }
+    video.addEventListener('ended', () => {
+      // 单条播完即停在末帧（同抖音网页版，不循环）
+    });
+    video.addEventListener('error', () => {
+      // 直链失效时请求下一个候选地址（最多重试 3 次）
+      const current = currentEntry();
+      if (current && current.awemeId === entry.awemeId) {
+        const retry = (entry._retry || 0) + 1;
+        if (retry <= 3) {
+          entry._retry = retry;
+          entry._src = '';
+          vscode.postMessage({ command: 'dy:requestPlay', awemeId: entry.awemeId, retryIndex: retry });
+        } else {
+          showToast('视频加载失败，可尝试在浏览器打开');
+        }
+      }
+    });
+    video.addEventListener('click', () => {
+      // 点击切换播放/暂停；点击视为用户手势，可解除静音降级
+      state.mutedFallback = false;
+      if (video.paused) {
+        video.muted = false;
+        video.play().catch(() => {});
+      } else {
+        video.pause();
+      }
+    });
+    videos.set(entry.awemeId, video);
+    card.appendChild(video);
+
+    const grad = document.createElement('div');
+    grad.className = 'dy-grad';
+    card.appendChild(grad);
+
+    const info = document.createElement('div');
+    info.className = 'dy-info';
+    info.innerHTML =
+      '<div class="dy-author">@' + escapeHtml(entry.author) + '</div>' +
+      '<div class="dy-title">' + escapeHtml(entry.title) + '</div>' +
+      '<div class="dy-stats">' + entry.durationText + ' · ' + entry.diggText + '赞 · ' +
+        entry.commentText + '评论 · ' + entry.shareText + '分享</div>';
+    card.appendChild(info);
+
+    const side = document.createElement('div');
+    side.className = 'dy-side';
+    const avatar = document.createElement('img');
+    avatar.className = 'dy-avatar';
+    if (entry.avatar) {
+      avatar.src = entry.avatar;
+    }
+    const openBtn = document.createElement('button');
+    openBtn.className = 'dy-side-btn';
+    openBtn.title = '在浏览器打开';
+    openBtn.innerHTML =
+      '<svg viewBox="0 0 24 24"><path d="M14 3h7v7h-2V6.41l-9.29 9.3-1.42-1.42 9.3-9.29H14V3Z' +
+      'M5 5h6v2H7v10h10v-4h2v6H5V5Z"/></svg><span>原页</span>';
+    openBtn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'dy:openOnSite', awemeId: entry.awemeId, url: entry.pageUrl });
+    });
+    side.appendChild(avatar);
+    side.appendChild(openBtn);
+    card.appendChild(side);
+
+    // 播放失败兜底层：无直链/全部重试失败时给出站外打开入口
+    const errTip = document.createElement('div');
+    errTip.className = 'dy-error-tip';
+    errTip.style.display = 'none';
+    errTip.innerHTML = '<span>该视频暂不支持内播</span>';
+    const errOpen = document.createElement('button');
+    errOpen.className = 'dy-empty-btn ghost';
+    errOpen.textContent = '在浏览器打开';
+    errOpen.addEventListener('click', () => {
+      vscode.postMessage({ command: 'dy:openOnSite', awemeId: entry.awemeId, url: entry.pageUrl });
+    });
+    errTip.appendChild(errOpen);
+    card.appendChild(errTip);
+    entry._errTip = errTip;
+
+    return card;
+  }
+
+  function buildCookieGuide(tab) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dy-empty';
+    wrap.innerHTML =
+      '<div class="dy-empty-icon"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-4 4 4 0 0 1-5-6Z"/>' +
+      '</svg></div>' +
+      '<div class="dy-empty-title">需要抖音登录态</div>' +
+      '<div class="dy-empty-desc">浏览器打开 <code>douyin.com</code> 登录后，按 F12 → Network → 任意请求的请求头<br>' +
+      '复制完整 Cookie 值（含 ttwid / sessionid_ss 等字段）</div>';
+    const btn = document.createElement('button');
+    btn.className = 'dy-empty-btn';
+    btn.textContent = '设置抖音 Cookie';
+    btn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'dy:openCookieInput' });
+    });
+    const retry = document.createElement('button');
+    retry.className = 'dy-empty-btn ghost';
+    retry.textContent = '已配置，重试';
+    retry.addEventListener('click', () => {
+      resetTab(tab);
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(retry);
+    return wrap;
+  }
+
+  /** 搜索被风控（verify_check）：引导去浏览器完成一次搜索验证后重试 */
+  function buildVerifyGuide(keyword) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dy-empty';
+    wrap.innerHTML =
+      '<div class="dy-empty-icon"><svg viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.25 3.84 10.16 9 12 5.16-1.84 9-6.75 9-12V5l-9-4zm-1 14 4-4-1.4-1.4L11 12.2 9.4 10.6 8 12l3 3z"/></svg></div>' +
+      '<div class="dy-empty-title">搜索需要人机验证</div>' +
+      '<div class="dy-empty-desc">抖音对搜索接口有额外风控（<code>verify_check</code>）。<br>' +
+      '请在浏览器打开抖音并搜索一次「' + escapeHtml(keyword) + '」完成验证，<br>然后回到此处点击「我已验证，重试」</div>';
+    const openBtn = document.createElement('button');
+    openBtn.className = 'dy-empty-btn';
+    openBtn.textContent = '去浏览器验证';
+    openBtn.addEventListener('click', () => {
+      vscode.postMessage({ command: 'dy:openSearchSite', keyword: keyword });
+    });
+    const retry = document.createElement('button');
+    retry.className = 'dy-empty-btn ghost';
+    retry.textContent = '我已验证，重试';
+    retry.addEventListener('click', () => {
+      submitSearch(keyword);
+    });
+    wrap.appendChild(openBtn);
+    wrap.appendChild(retry);
+    return wrap;
+  }
+
+  function buildEmptyTip(text, withRetry) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dy-empty';
+    wrap.innerHTML =
+      '<div class="dy-empty-icon"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1 5h2v2h-2V7Zm0 4h2v6h-2v-6Z"/></svg></div>' +
+      '<div class="dy-empty-title">' + escapeHtml(text) + '</div>';
+    if (withRetry) {
+      const retry = document.createElement('button');
+      retry.className = 'dy-empty-btn ghost';
+      retry.textContent = '重试';
+      retry.addEventListener('click', () => {
+        resetTab(state.tab);
+      });
+      wrap.appendChild(retry);
+    }
+    return wrap;
+  }
+
+  // ---------- 列表渲染 ----------
+  function renderList(tab, keepIndex) {
+    const list = state.entries[tab];
+    feedEl.innerHTML = '';
+    for (const video of videos.values()) {
+      // 重建列表前统一释放旧视频资源
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    }
+    videos.clear();
+
+    if (list.length === 0) {
+      if (tab === 'search' && state.searchVerify) {
+        feedEl.appendChild(buildVerifyGuide(state.searchKeyword));
+      } else if (state.needCookie[tab]) {
+        feedEl.appendChild(buildCookieGuide(tab));
+      } else if (state.loading[tab]) {
+        feedEl.appendChild(buildEmptyTip('正在加载…', false));
+      } else {
+        const emptyText = tab === 'search'
+          ? '未找到相关视频，换个关键词试试'
+          : (tab === 'following' ? '关注内容为空' : '暂无内容');
+        feedEl.appendChild(buildEmptyTip(emptyText, tab !== 'search'));
+      }
+      return;
+    }
+    for (const entry of list) {
+      feedEl.appendChild(buildCard(entry));
+    }
+    const startIndex = keepIndex ? Math.min(state.activeIndex[tab], list.length - 1) : 0;
+    state.activeIndex[tab] = startIndex;
+    requestAnimationFrame(() => {
+      feedEl.scrollTop = startIndex * feedEl.clientHeight;
+      activateIndex(startIndex, !AUTO_PLAY);
+    });
+  }
+
+  function appendEntries(tab, entries) {
+    const list = state.entries[tab];
+    for (const entry of entries) {
+      if (!list.some((item) => item.awemeId === entry.awemeId)) {
+        list.push(entry);
+        feedEl.appendChild(buildCard(entry));
+      }
+    }
+  }
+
+  // ---------- 播放控制 ----------
+  function currentEntry() {
+    const list = state.entries[state.tab];
+    return list[state.activeIndex[state.tab]] || null;
+  }
+
+  function currentVideo() {
+    const entry = currentEntry();
+    return entry ? videos.get(entry.awemeId) : null;
+  }
+
+  /** 请求解析播放地址（去重：同一 retryIndex 只发一次） */
+  function requestSrc(entry) {
+    if (entry._src || entry._requestedRetry === (entry._retry || 0)) {
+      return;
+    }
+    entry._requestedRetry = entry._retry || 0;
+    vscode.postMessage({ command: 'dy:requestPlay', awemeId: entry.awemeId, retryIndex: entry._retry || 0 });
+  }
+
+  function activateIndex(index, pausedOnly) {
+    const tab = state.tab;
+    const list = state.entries[tab];
+    const active = list[index];
+    if (!active) {
+      return;
+    }
+    // 预加载窗口：当前 ±1 保留 src（顺带预取相邻地址），其余回收（防长列表内存膨胀）
+    list.forEach((entry, idx) => {
+      const video = videos.get(entry.awemeId);
+      if (!video) {
+        return;
+      }
+      if (Math.abs(idx - index) <= 1) {
+        requestSrc(entry); // 幂等：已解析/已请求则跳过
+        if (entry._src && video.getAttribute('src') !== entry._src) {
+          video.src = entry._src; // 列表重建后恢复挂载（元素是新创建的）
+        }
+      } else if (entry._src) {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        entry._src = '';
+        entry._requestedRetry = -1; // 允许滑回时重新解析
+      }
+    });
+    const video = videos.get(active.awemeId);
+    if (!video) {
+      return;
+    }
+    if (!active._src || !video.getAttribute('src')) {
+      if (active._src) {
+        video.src = active._src;
+      } else {
+        requestSrc(active); // src 就绪后由 playResolved 消息触发播放
+        return;
+      }
+    }
+    if (pausedOnly) {
+      video.pause();
+      return;
+    }
+    video.muted = state.mutedFallback;
+    video.volume = INITIAL_VOLUME;
+    const playPromise = video.play();
+    if (playPromise && playPromise.catch) {
+      playPromise.catch(() => {
+        // 有声自动播放被策略拒绝时降级静音，并提示点击恢复声音
+        state.mutedFallback = true;
+        video.muted = true;
+        video.play().catch(() => {});
+        showToast('已静音播放，点击画面可恢复声音');
+      });
+    }
+  }
+
+  /** 滚动驱动：rAF 节流计算当前索引 */
+  let scrollRaf = 0;
+  feedEl.addEventListener('scroll', () => {
+    if (scrollRaf) {
+      return;
+    }
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      if (feedEl.clientHeight <= 0) {
+        return;
+      }
+      const index = Math.round(feedEl.scrollTop / feedEl.clientHeight);
+      const tab = state.tab;
+      if (index !== state.activeIndex[tab] && state.entries[tab][index]) {
+        state.activeIndex[tab] = index;
+        activateIndex(index, !AUTO_PLAY);
+      }
+      // 接近底部自动加载更多
+      maybeLoadMore(index);
+    });
+  });
+
+  function maybeLoadMore(index) {
+    const tab = state.tab;
+    const list = state.entries[tab];
+    if (list.length === 0 || state.loading[tab]) {
+      return;
+    }
+    if (tab === 'following' && !state.hasMoreFollowing) {
+      return;
+    }
+    if (tab === 'search' && !state.hasMoreSearch) {
+      return;
+    }
+    if (index >= list.length - 3) {
+      requestMore(tab);
+    }
+  }
+
+  function requestMore(tab) {
+    state.loading[tab] = true;
+    const loadingText = tab === 'feed' ? '加载更多推荐…' : (tab === 'following' ? '加载更多关注…' : '加载更多搜索结果…');
+    setLoading(true, loadingText);
+    if (tab === 'feed') {
+      vscode.postMessage({ command: 'dy:requestFeed', reset: false });
+    } else if (tab === 'following') {
+      vscode.postMessage({ command: 'dy:requestFollowing', reset: false });
+    } else {
+      vscode.postMessage({ command: 'dy:requestSearch', keyword: state.searchKeyword, reset: false });
+    }
+  }
+
+  function resetTab(tab) {
+    state.entries[tab] = [];
+    state.activeIndex[tab] = 0;
+    state.needCookie[tab] = false;
+    if (tab === 'following') {
+      state.hasMoreFollowing = true;
+    }
+    if (tab === 'search') {
+      state.hasMoreSearch = true;
+      state.searchVerify = false;
+    }
+    state.loading[tab] = true;
+    renderList(tab, false);
+    const loadingText = tab === 'feed' ? '加载推荐…' : (tab === 'following' ? '加载关注…' : '搜索中…');
+    setLoading(true, loadingText);
+    if (tab === 'feed') {
+      vscode.postMessage({ command: 'dy:requestFeed', reset: true });
+    } else if (tab === 'following') {
+      vscode.postMessage({ command: 'dy:requestFollowing', reset: true });
+    } else {
+      vscode.postMessage({ command: 'dy:requestSearch', keyword: state.searchKeyword, reset: true });
+    }
+  }
+
+  // ---------- 分区切换 ----------
+  /** 切换顶部 tab（feed/following）；search 为搜索结果态，无对应 tab 元素 */
+  function switchTab(tab) {
+    if (tab === state.tab) {
+      return;
+    }
+    document.querySelectorAll('.dy-tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
+    // 暂停旧分区视频
+    const oldVideo = currentVideo();
+    if (oldVideo) {
+      oldVideo.pause();
+    }
+    state.tab = tab;
+    renderList(tab, true);
+    if ((tab === 'feed' || tab === 'following') && state.entries[tab].length === 0 && !state.loading[tab]) {
+      resetTab(tab);
+    }
+  }
+
+  document.querySelectorAll('.dy-tab').forEach((tabEl) => {
+    tabEl.addEventListener('click', () => {
+      switchTab(tabEl.dataset.tab);
+    });
+  });
+
+  // ---------- 搜索 ----------
+  const searchForm = document.getElementById('searchForm');
+  const searchInput = document.getElementById('searchInput');
+
+  /** 提交关键词：进入搜索结果竖滑流并拉首批 */
+  function submitSearch(keyword) {
+    const kw = String(keyword == null ? searchInput.value : keyword).trim();
+    if (!kw) {
+      return;
+    }
+    searchInput.value = kw;
+    state.searchKeyword = kw;
+    state.searchVerify = false;
+    state.needCookie.search = false;
+    state.hasMoreSearch = true;
+    // 无论当前是否已在 search，都以新关键词重置
+    state.tab = 'search';
+    document.querySelectorAll('.dy-tab').forEach((el) => el.classList.remove('active'));
+    resetTab('search');
+  }
+
+  /** 退出搜索态：清空输入并回到推荐 */
+  function exitSearch() {
+    searchInput.value = '';
+    if (state.tab === 'search') {
+      switchTab('feed');
+    }
+  }
+
+  searchForm.addEventListener('submit', (event) => {
+    event.preventDefault(); // form 在 webview 内提交会刷新页面，必须拦截
+    submitSearch(searchInput.value);
+  });
+  // 输入框自带 ×（清空）按钮：清空后若处于搜索态则返回推荐
+  searchInput.addEventListener('search', () => {
+    if (!searchInput.value && state.tab === 'search') {
+      exitSearch();
+    }
+  });
+  // Escape 快速退出搜索
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      searchInput.blur();
+      exitSearch();
+    }
+  });
+
+  // ---------- Cookie 按钮 ----------
+  document.getElementById('cookieBtn').addEventListener('click', () => {
+    vscode.postMessage({ command: 'dy:openCookieInput' });
+  });
+
+  // ---------- 键盘导航 ----------
+  function navigate(dir) {
+    const tab = state.tab;
+    const target = state.activeIndex[tab] + (dir === 'prev' ? -1 : 1);
+    if (target < 0 || target >= state.entries[tab].length) {
+      return;
+    }
+    feedEl.scrollTo({ top: target * feedEl.clientHeight, behavior: 'smooth' });
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      navigate('prev');
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      navigate('next');
+    }
+  });
+
+  // ---------- webview 隐藏时暂停（retainContextWhenHidden 下 JS 仍在运行） ----------
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      const video = currentVideo();
+      if (video) {
+        video.pause();
+      }
+    } else if (AUTO_PLAY) {
+      activateIndex(state.activeIndex[state.tab], false);
+    }
+  });
+
+  // ---------- 宿主消息 ----------
+  window.addEventListener('message', (event) => {
+    const message = event.data;
+    if (!message || typeof message.command !== 'string') {
+      return;
+    }
+    switch (message.command) {
+      case 'dy:feedData':
+      case 'dy:followingData':
+      case 'dy:searchData': {
+        const tab = message.command === 'dy:feedData' ? 'feed'
+          : message.command === 'dy:followingData' ? 'following' : 'search';
+        const isReset = Boolean(message.reset);
+        state.loading[tab] = false;
+        if (message.error && (isReset || state.entries[tab].length === 0)) {
+          state.needCookie[tab] = Boolean(message.needCookie);
+          // 搜索风控（verify_check）：展示"去浏览器验证"引导卡片
+          state.searchVerify = tab === 'search' && Boolean(message.verifyRequired);
+          if (message.keyword) {
+            state.searchKeyword = message.keyword;
+          }
+          if (tab === state.tab) {
+            renderList(tab, false);
+            setLoading(false);
+          }
+          showToast(message.error);
+          break;
+        }
+        state.needCookie[tab] = false;
+        if (tab === 'search') {
+          state.searchVerify = false;
+        }
+        const entries = Array.isArray(message.entries) ? message.entries : [];
+        if (tab === 'following') {
+          state.hasMoreFollowing = Boolean(message.hasMore);
+        }
+        if (tab === 'search') {
+          state.hasMoreSearch = Boolean(message.hasMore);
+          if (message.keyword) {
+            state.searchKeyword = message.keyword;
+          }
+        }
+        if (tab === state.tab) {
+          setLoading(false);
+          if (isReset) {
+            state.entries[tab] = entries;
+            renderList(tab, false);
+          } else {
+            appendEntries(tab, entries);
+          }
+        } else {
+          // 后台分区数据：仅合入状态，不渲染
+          const list = state.entries[tab];
+          for (const entry of entries) {
+            if (!list.some((item) => item.awemeId === entry.awemeId)) {
+              list.push(entry);
+            }
+          }
+        }
+        break;
+      }
+      case 'dy:playResolved': {
+        // 播放解析按 awemeId 查找：先当前分区，再其余分区（搜索/关注/推荐间复用缓存）
+        const otherTabs = ['feed', 'following', 'search'].filter((tab) => tab !== state.tab);
+        const entry = state.entries[state.tab].find((item) => item.awemeId === message.awemeId) ||
+          state.entries[otherTabs[0]].find((item) => item.awemeId === message.awemeId) ||
+          state.entries[otherTabs[1]].find((item) => item.awemeId === message.awemeId);
+        if (!entry) {
+          break;
+        }
+        if (message.url) {
+          entry._src = message.url;
+          const video = videos.get(message.awemeId);
+          if (video) {
+            video.src = message.url;
+            const isActive = currentEntry() && currentEntry().awemeId === message.awemeId;
+            if (isActive && AUTO_PLAY) {
+              activateIndex(state.activeIndex[state.tab], false);
+            }
+          }
+        } else if (message.error) {
+          if (message.pageUrl) {
+            entry._errTip.style.display = 'flex';
+          }
+          showToast(message.error);
+        }
+        break;
+      }
+      case 'dy:cookieChanged': {
+        // Cookie 更新：清空全部数据并重载当前分区（其余分区首次切换时自动加载）
+        state.entries = { feed: [], following: [], search: [] };
+        state.needCookie = { feed: false, following: false, search: false };
+        state.hasMoreFollowing = true;
+        state.hasMoreSearch = false;
+        state.searchVerify = false;
+        state.searchKeyword = '';
+        searchInput.value = '';
+        showToast(message.hasCookie ? 'Cookie 已更新，正在重新加载' : 'Cookie 已清空');
+        // Cookie 变更后统一回到推荐分区（搜索结果依赖登录态，旧结果无意义）；
+        // 手动切换避免 switchTab 自动首载与下方 resetTab 重复发请求
+        if (state.tab === 'search') {
+          document.querySelectorAll('.dy-tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === 'feed'));
+          state.tab = 'feed';
+        }
+        resetTab(state.tab);
+        break;
+      }
+      case 'dy:cmdReload': {
+        resetTab(state.tab);
+        break;
+      }
+      case 'dy:cmdNavigate': {
+        navigate(message.dir);
+        break;
+      }
+      default:
+        break;
+    }
+  });
+
+  // ---------- 启动 ----------
+  resetTab('feed');
+})();
+</script>
+</body>
+</html>
